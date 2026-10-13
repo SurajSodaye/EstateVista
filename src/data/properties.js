@@ -496,14 +496,14 @@ export const POPULAR_LOCATIONS = [
   {
     city: "Pune",
     state: "Maharashtra",
-    image: "https://images.unsplash.com/photo-1627916607164-7b20241db935?auto=format&fit=crop&w=600&q=80",
+    image: "./image/pune.jpg",
     tagline: "Cultural Sophistication & Green Enclaves",
     popularLocalities: ["Koregaon Park", "Kalyani Nagar", "Baner"],
   },
   {
     city: "Hyderabad",
     state: "Telangana",
-    image: "https://images.unsplash.com/photo-1605649487212-47bdab064df8?auto=format&fit=crop&w=600&q=80",
+    image: "./image/hyderabad.jpg",
     tagline: "Royal Heritage Meets Modern Skyline",
     popularLocalities: ["Jubilee Hills", "Banjara Hills", "HITEC City"],
   }
