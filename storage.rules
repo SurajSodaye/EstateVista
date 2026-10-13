@@ -1,0 +1,70 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Authentication & trusted Firestore authorization helpers
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function userExists() {
+      return isAuthenticated() && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid));
+    }
+
+    function getUserData() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return userExists() && getUserData().role == 'admin';
+    }
+
+    function isApprovedAdvisor() {
+      return userExists() && (
+        isAdmin() || (
+          getUserData().role == 'agent' && getUserData().advisorStatus == 'approved'
+        )
+      );
+    }
+
+    // 1. Property photography: /properties/{userId}/{allPaths=**}
+    // Preserves existing application upload path: properties/${currentUid}/${timestamp}_${safeName}
+    // - Public read for listing discovery
+    // - Only accredited advisors can upload/manage media under their own UID directory
+    // - Admins retain full moderation and cleanup permissions
+    // - Strict image MIME validation and 10MB limit
+    match /properties/{userId}/{allPaths=**} {
+      allow read: if true;
+      allow create, update: if (
+        ((isOwner(userId) && isApprovedAdvisor()) || isAdmin())
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*')
+      );
+      allow delete: if (isOwner(userId) && isApprovedAdvisor()) || isAdmin();
+    }
+
+    // Fallback rule for root property media or administrator maintenance operations
+    match /properties/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // 2. Profile avatars: /avatars/{userId}/{allPaths=**}
+    // Preserves existing application upload path: avatars/${currentUid}/${timestamp}_${safeName}
+    // - Public read for advisor cards and profile display
+    // - Only the authenticated account owner or admin can upload/update avatars under their UID
+    // - Strict image MIME validation and 5MB limit
+    match /avatars/{userId}/{allPaths=**} {
+      allow read: if true;
+      allow create, update: if (
+        (isOwner(userId) || isAdmin())
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*')
+      );
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+  }
+}

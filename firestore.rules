@@ -1,0 +1,162 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions for authentication and trusted role evaluation
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function userExists() {
+      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return userExists() && getUserData().role == 'admin';
+    }
+
+    // An accredited advisor must have role == 'agent' or 'admin', and approval status == 'approved'
+    function isApprovedAdvisor() {
+      return userExists() && (
+        isAdmin() || (
+          getUserData().role == 'agent' && getUserData().advisorStatus == 'approved'
+        )
+      );
+    }
+
+    // 1. Users collection: /users/{userId}
+    match /users/{userId} {
+      // Users can only read their own profile; admins can read any profile
+      allow read: if isOwner(userId) || isAdmin();
+
+      // On profile creation during registration:
+      // - Must be authenticated owner
+      // - role MUST strictly be 'customer' (client cannot set role: 'agent' or 'admin')
+      // - advisorStatus MUST strictly be 'none' or absent
+      // - uid field, if provided, must match authenticated user
+      allow create: if isOwner(userId)
+                    && request.resource.data.role == 'customer'
+                    && (!('advisorStatus' in request.resource.data) || request.resource.data.advisorStatus == 'none')
+                    && (!('uid' in request.resource.data) || request.resource.data.uid == userId);
+
+      // On profile update:
+      // - User can update contact details (name, phone)
+      // - User CANNOT change their own role! (request role must match existing resource role)
+      // - User CANNOT self-approve (request advisorStatus cannot be 'approved' unless user is admin)
+      // - User can submit an application which transitions advisorStatus from 'none' to 'pending'
+      // - User CANNOT change their uid
+      allow update: if (
+        isOwner(userId)
+        && request.resource.data.role == resource.data.role
+        && (!('uid' in request.resource.data) || request.resource.data.uid == resource.data.uid)
+        && (
+          // Status unchanged (safely handles existing/incoming field absence)
+          (
+            ('advisorStatus' in request.resource.data && 'advisorStatus' in resource.data && request.resource.data.advisorStatus == resource.data.advisorStatus)
+            || (!('advisorStatus' in request.resource.data) && !('advisorStatus' in resource.data))
+            || (!('advisorStatus' in resource.data) && 'advisorStatus' in request.resource.data && request.resource.data.advisorStatus == 'none')
+          )
+          // OR transition to 'pending' on valid advisor application submission
+          || (
+            (!('advisorStatus' in resource.data) || resource.data.advisorStatus == 'none')
+            && 'advisorStatus' in request.resource.data
+            && request.resource.data.advisorStatus == 'pending'
+          )
+        )
+      ) || isAdmin();
+
+      // Only admins can delete user profiles
+      allow delete: if isAdmin();
+    }
+
+    // 2. Advisor Applications collection: /advisorApplications/{userId}
+    match /advisorApplications/{userId} {
+      // Authenticated user can read their own application; admins can read all
+      allow read: if isOwner(userId) || isAdmin();
+
+      // Authenticated user can submit an application:
+      // - Must be authenticated owner
+      // - status MUST strictly be 'pending' (clients cannot submit with status: 'approved')
+      // - uid field, if provided, must match authenticated user
+      allow create: if isOwner(userId)
+                    && request.resource.data.status == 'pending'
+                    && (!('uid' in request.resource.data) || request.resource.data.uid == userId);
+
+      // Applicants can update details while status remains pending, but cannot approve themselves
+      allow update: if (
+        isOwner(userId)
+        && resource.data.status == 'pending'
+        && request.resource.data.status == 'pending'
+        && (!('uid' in request.resource.data) || request.resource.data.uid == resource.data.uid)
+      ) || isAdmin();
+
+      // Only admins can delete applications or change status to approved/rejected
+      allow delete: if isAdmin();
+    }
+
+    // 3. Inquiries collection: /inquiries/{inquiryId}
+    match /inquiries/{inquiryId} {
+      // Anyone can submit a property inquiry with valid contact email and message
+      allow create: if ((('senderEmail' in request.resource.data && request.resource.data.senderEmail != null) ||
+                         ('clientEmail' in request.resource.data && request.resource.data.clientEmail != null)))
+                    && request.resource.data.message != null;
+      // Approved advisors can read inquiries directed to them; admins can read all
+      allow read: if isApprovedAdvisor() && (
+        resource.data.advisorUid == request.auth.uid || isAdmin()
+      );
+      // Approved advisors can update inquiry status/notes for their own listings; admins can update all
+      allow update: if isApprovedAdvisor() && (
+        resource.data.advisorUid == request.auth.uid || isAdmin()
+      );
+      // Only admins can permanently delete inquiries
+      allow delete: if isAdmin();
+    }
+
+    // 4. Properties collection: /properties/{propertyId}
+    match /properties/{propertyId} {
+      // Public can read published properties; approved advisors and admins can read all
+      allow read: if resource.data.isPublished == true || isApprovedAdvisor();
+
+      // Properties creation:
+      // - Admins can create with any publication status
+      // - Approved advisors can create only under their own UID, strictly as unpublished draft or pending approval
+      allow create: if isAdmin() || (
+        isApprovedAdvisor()
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.isPublished == false
+        && request.resource.data.publicationStatus in ['draft', 'pending']
+      );
+
+      // Properties update:
+      // - Admins can moderate, approve, publish, reject, or edit any property
+      // - Approved advisors can only update their own listings and CANNOT self-publish or bypass admin moderation
+      allow update: if isAdmin() || (
+        isApprovedAdvisor()
+        && resource.data.createdByUid == request.auth.uid
+        && (!('createdByUid' in request.resource.data) || request.resource.data.createdByUid == resource.data.createdByUid)
+        && request.resource.data.isPublished == false
+        && request.resource.data.publicationStatus in ['draft', 'pending']
+      );
+
+      // Advisors can delete their own properties; admins can delete any property
+      allow delete: if isAdmin() || (
+        isApprovedAdvisor()
+        && resource.data.createdByUid == request.auth.uid
+      );
+    }
+
+    // 5. Audit Logs collection: /auditLogs/{logId}
+    match /auditLogs/{logId} {
+      // Only authenticated administrators can read and record audit logs
+      allow read, write: if isAdmin();
+    }
+  }
+}

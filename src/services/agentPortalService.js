@@ -1,0 +1,827 @@
+/**
+ * EstateVista Advisor Portal Firebase Service Layer
+ *
+ * FULL DYNAMIC CLOUD FIRESTORE & FIREBASE STORAGE INTEGRATION:
+ * 1. Cloud Firestore is the authoritative source of truth for all advisor business records:
+ *    - /users/{uid}: Advisor identity, biography, credentials, and settings.
+ *    - /properties/{propertyId}: Property metadata, images, pricing, and publication workflow.
+ *    - /inquiries/{inquiryId}: Customer inquiries and client leads routed to the listing advisor.
+ * 2. Firebase Storage is the authoritative media store for high-res property photos and avatars.
+ * 3. Multi-Session Isolation: All reads and writes strictly use `agentDb`, `agentAuth`, and
+ *    `agentStorage` (AgentApp instance), preserving complete session isolation from Customer
+ *    and Admin portals.
+ * 4. Real-time updates: Provides `onSnapshot` listeners with clean unsubscribe handlers.
+ */
+
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  addDoc,
+  query,
+  where,
+  onSnapshot,
+} from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import {
+  agentDb,
+  agentAuth,
+  agentStorage,
+  isFirebaseConfigured,
+} from '../lib/firebase.js';
+
+// ==========================================
+// 1. DASHBOARD OVERVIEW & ANALYTICS
+// ==========================================
+
+/**
+ * Fetch dynamic aggregate metrics for the signed-in advisor
+ * @returns {Promise<Object>} Dynamic statistics object
+ */
+export async function getAgentDashboardStats() {
+  const currentUid = agentAuth?.currentUser?.uid;
+  if (!isFirebaseConfigured || !agentDb || !currentUid) {
+    return getEmptyDashboardStats();
+  }
+
+  try {
+    // 1. Fetch properties belonging to the signed-in advisor
+    const propQuery = query(
+      collection(agentDb, 'properties'),
+      where('createdByUid', '==', currentUid)
+    );
+    const propSnapshot = await getDocs(propQuery);
+    const properties = [];
+    propSnapshot.forEach((docSnap) => {
+      properties.push({ id: docSnap.id, ...docSnap.data() });
+    });
+
+    // 2. Fetch inquiries assigned to the signed-in advisor
+    const inqQuery = query(
+      collection(agentDb, 'inquiries'),
+      where('advisorUid', '==', currentUid)
+    );
+    const inqSnapshot = await getDocs(inqQuery);
+    const inquiries = [];
+    inqSnapshot.forEach((docSnap) => {
+      inquiries.push({ id: docSnap.id, ...docSnap.data() });
+    });
+
+    return calculateDashboardStats(properties, inquiries);
+  } catch (err) {
+    console.error('[AgentPortalService] Failed to fetch dashboard statistics:', err);
+    return getEmptyDashboardStats();
+  }
+}
+
+/**
+ * Subscribe to real-time dashboard statistics updates
+ * @param {Function} callback - (stats: Object) => void
+ * @returns {Function} Unsubscribe function
+ */
+export function subscribeAgentDashboardStats(callback) {
+  const currentUid = agentAuth?.currentUser?.uid;
+  if (!isFirebaseConfigured || !agentDb || !currentUid) {
+    callback(getEmptyDashboardStats());
+    return () => {};
+  }
+
+  let properties = [];
+  let inquiries = [];
+
+  const propQuery = query(
+    collection(agentDb, 'properties'),
+    where('createdByUid', '==', currentUid)
+  );
+  const inqQuery = query(
+    collection(agentDb, 'inquiries'),
+    where('advisorUid', '==', currentUid)
+  );
+
+  const unsubProps = onSnapshot(
+    propQuery,
+    (snapshot) => {
+      properties = [];
+      snapshot.forEach((docSnap) => {
+        properties.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      callback(calculateDashboardStats(properties, inquiries));
+    },
+    (err) => console.warn('[AgentPortalService] Property stats listener warning:', err)
+  );
+
+  const unsubInqs = onSnapshot(
+    inqQuery,
+    (snapshot) => {
+      inquiries = [];
+      snapshot.forEach((docSnap) => {
+        inquiries.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      callback(calculateDashboardStats(properties, inquiries));
+    },
+    (err) => console.warn('[AgentPortalService] Inquiry stats listener warning:', err)
+  );
+
+  return () => {
+    unsubProps();
+    unsubInqs();
+  };
+}
+
+function calculateDashboardStats(properties, inquiries) {
+  const publishedCount = properties.filter((p) => p.publicationStatus === 'published').length;
+  const draftCount = properties.filter((p) => p.publicationStatus === 'draft').length;
+  const pendingCount = properties.filter((p) => p.publicationStatus === 'pending').length;
+  const rejectedCount = properties.filter((p) => p.publicationStatus === 'rejected').length;
+  const newInquiriesCount = inquiries.filter((i) => i.status === 'new').length;
+
+  const recentProperties = [...properties]
+    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+    .slice(0, 5);
+
+  const recentInquiries = [...inquiries]
+    .sort((a, b) => new Date(b.createdAt || b.date || 0) - new Date(a.createdAt || a.date || 0))
+    .slice(0, 5);
+
+  // Dynamic monthly activity calculated from actual inquiries
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const now = new Date();
+  const monthlyActivity = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const mName = months[d.getMonth()];
+    const year = d.getFullYear();
+    const mInquiries = inquiries.filter((inq) => {
+      const inqDate = new Date(inq.createdAt || inq.date || 0);
+      return inqDate.getFullYear() === year && inqDate.getMonth() === d.getMonth();
+    }).length;
+    monthlyActivity.push({
+      month: mName,
+      inquiries: mInquiries,
+      views: mInquiries * 20,
+    });
+  }
+
+  return {
+    totalProperties: properties.length,
+    publishedCount,
+    draftCount,
+    pendingCount,
+    rejectedCount,
+    totalInquiries: inquiries.length,
+    newInquiriesCount,
+    recentProperties,
+    recentInquiries,
+    monthlyActivity,
+  };
+}
+
+function getEmptyDashboardStats() {
+  const months = ['May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct'];
+  return {
+    totalProperties: 0,
+    publishedCount: 0,
+    draftCount: 0,
+    pendingCount: 0,
+    rejectedCount: 0,
+    totalInquiries: 0,
+    newInquiriesCount: 0,
+    recentProperties: [],
+    recentInquiries: [],
+    monthlyActivity: months.map((m) => ({ month: m, inquiries: 0, views: 0 })),
+  };
+}
+
+// ==========================================
+// 2. PROPERTIES CRUD OPERATIONS
+// ==========================================
+
+/**
+ * Fetch all properties belonging to the authenticated advisor
+ * @param {Object} options { search, status, listingType, sortBy }
+ * @returns {Promise<Array>} List of property documents
+ */
+export async function getAgentProperties({ search = '', status = 'all', listingType = 'all', sortBy = 'newest' } = {}) {
+  const currentUid = agentAuth?.currentUser?.uid;
+  if (!isFirebaseConfigured || !agentDb || !currentUid) {
+    return [];
+  }
+
+  try {
+    const q = query(
+      collection(agentDb, 'properties'),
+      where('createdByUid', '==', currentUid)
+    );
+    const snapshot = await getDocs(q);
+    let properties = [];
+    snapshot.forEach((docSnap) => {
+      properties.push({ id: docSnap.id, ...docSnap.data() });
+    });
+
+    // 1. Status Filter
+    if (status && status !== 'all') {
+      properties = properties.filter((p) => p.publicationStatus === status);
+    }
+
+    // 2. Listing Type Filter (Buy / Rent)
+    if (listingType && listingType !== 'all') {
+      properties = properties.filter((p) => (p.listingType || '').toLowerCase() === listingType.toLowerCase());
+    }
+
+    // 3. Search Filter
+    if (search && search.trim()) {
+      const qText = search.trim().toLowerCase();
+      properties = properties.filter(
+        (p) =>
+          (p.title || '').toLowerCase().includes(qText) ||
+          (p.location || '').toLowerCase().includes(qText) ||
+          (p.city || '').toLowerCase().includes(qText) ||
+          (p.locality || '').toLowerCase().includes(qText)
+      );
+    }
+
+    // 4. Sorting
+    if (sortBy === 'newest') {
+      properties.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+    } else if (sortBy === 'price-desc') {
+      properties.sort((a, b) => (Number(b.price) || 0) - (Number(a.price) || 0));
+    } else if (sortBy === 'price-asc') {
+      properties.sort((a, b) => (Number(a.price) || 0) - (Number(b.price) || 0));
+    } else if (sortBy === 'title') {
+      properties.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+    }
+
+    return properties;
+  } catch (err) {
+    console.error('[AgentPortalService] Failed to load properties:', err);
+    return [];
+  }
+}
+
+/**
+ * Real-time listener for advisor properties
+ * @param {Function} callback - (properties: Array) => void
+ * @param {Object} options
+ * @returns {Function} Unsubscribe function
+ */
+export function subscribeAgentProperties(callback, { search = '', status = 'all', listingType = 'all', sortBy = 'newest' } = {}) {
+  const currentUid = agentAuth?.currentUser?.uid;
+  if (!isFirebaseConfigured || !agentDb || !currentUid) {
+    callback([]);
+    return () => {};
+  }
+
+  const q = query(
+    collection(agentDb, 'properties'),
+    where('createdByUid', '==', currentUid)
+  );
+
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      let properties = [];
+      snapshot.forEach((docSnap) => {
+        properties.push({ id: docSnap.id, ...docSnap.data() });
+      });
+
+      if (status && status !== 'all') {
+        properties = properties.filter((p) => p.publicationStatus === status);
+      }
+      if (listingType && listingType !== 'all') {
+        properties = properties.filter((p) => (p.listingType || '').toLowerCase() === listingType.toLowerCase());
+      }
+      if (search && search.trim()) {
+        const qText = search.trim().toLowerCase();
+        properties = properties.filter(
+          (p) =>
+            (p.title || '').toLowerCase().includes(qText) ||
+            (p.location || '').toLowerCase().includes(qText) ||
+            (p.city || '').toLowerCase().includes(qText) ||
+            (p.locality || '').toLowerCase().includes(qText)
+        );
+      }
+      if (sortBy === 'newest') {
+        properties.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+      } else if (sortBy === 'price-desc') {
+        properties.sort((a, b) => (Number(b.price) || 0) - (Number(a.price) || 0));
+      } else if (sortBy === 'price-asc') {
+        properties.sort((a, b) => (Number(a.price) || 0) - (Number(b.price) || 0));
+      } else if (sortBy === 'title') {
+        properties.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+      }
+
+      callback(properties);
+    },
+    (err) => {
+      console.warn('[AgentPortalService] Properties listener warning:', err);
+      callback([]);
+    }
+  );
+}
+
+/**
+ * Fetch a single property listing by ID
+ * @param {string} id
+ * @returns {Promise<Object|null>}
+ */
+export async function getAgentPropertyById(id) {
+  if (!isFirebaseConfigured || !agentDb || !id) return null;
+
+  try {
+    const docRef = doc(agentDb, 'properties', id);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return { id: snap.id, ...snap.data() };
+    }
+    return null;
+  } catch (err) {
+    console.error('[AgentPortalService] Failed to fetch property by id:', err);
+    return null;
+  }
+}
+
+/**
+ * Create a new property listing in Cloud Firestore
+ * @param {Object} propertyData
+ * @param {string} targetStatus ('draft' | 'pending' | 'published')
+ * @returns {Promise<Object>} Created property with document ID
+ */
+export async function createAgentProperty(propertyData, targetStatus = 'draft') {
+  if (!isFirebaseConfigured || !agentDb) {
+    throw new Error('Firebase configuration missing.');
+  }
+
+  const currentUid = agentAuth?.currentUser?.uid;
+  if (!currentUid) {
+    throw new Error('You must be signed in with advisor credentials to create a property.');
+  }
+
+  const nowIso = new Date().toISOString();
+  const author = agentAuth.currentUser;
+
+  const payload = {
+    ...propertyData,
+    price: Number(propertyData.price) || 0,
+    areaSqFt: Number(propertyData.areaSqFt) || 0,
+    bedrooms: Number(propertyData.bedrooms) || 0,
+    bathrooms: Number(propertyData.bathrooms) || 0,
+    parkingSlots: Number(propertyData.parkingSlots) || 0,
+    publicationStatus: targetStatus,
+    isPublished: targetStatus === 'published',
+    rejectionReason: null,
+    createdByUid: currentUid,
+    agentId: currentUid,
+    agentName: author.displayName || 'Advisor',
+    agentEmail: author.email || '',
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  };
+
+  const docRef = await addDoc(collection(agentDb, 'properties'), payload);
+  return { id: docRef.id, ...payload };
+}
+
+/**
+ * Update an existing property listing in Cloud Firestore
+ * @param {string} id
+ * @param {Object} updates
+ * @returns {Promise<Object>} Updated property
+ */
+export async function updateAgentProperty(id, updates) {
+  if (!isFirebaseConfigured || !agentDb || !id) {
+    throw new Error('Firebase configuration or property ID missing.');
+  }
+
+  const currentUid = agentAuth?.currentUser?.uid;
+  if (!currentUid) {
+    throw new Error('You must be signed in to edit property listings.');
+  }
+
+  const propRef = doc(agentDb, 'properties', id);
+  const existingSnap = await getDoc(propRef);
+  if (!existingSnap.exists()) {
+    throw new Error('Property listing not found.');
+  }
+
+  const existingData = existingSnap.data();
+  if (existingData.createdByUid !== currentUid) {
+    throw new Error('Security Error: You are only permitted to update your own listings.');
+  }
+
+  const nowIso = new Date().toISOString();
+  const safeUpdates = {
+    ...updates,
+    updatedAt: nowIso,
+  };
+
+  // Ownership immutability
+  delete safeUpdates.createdByUid;
+  delete safeUpdates.id;
+
+  if (updates.price !== undefined) safeUpdates.price = Number(updates.price) || 0;
+  if (updates.areaSqFt !== undefined) safeUpdates.areaSqFt = Number(updates.areaSqFt) || 0;
+  if (updates.bedrooms !== undefined) safeUpdates.bedrooms = Number(updates.bedrooms) || 0;
+  if (updates.bathrooms !== undefined) safeUpdates.bathrooms = Number(updates.bathrooms) || 0;
+  if (updates.parkingSlots !== undefined) safeUpdates.parkingSlots = Number(updates.parkingSlots) || 0;
+
+  if (updates.publicationStatus) {
+    safeUpdates.isPublished = updates.publicationStatus === 'published';
+  }
+
+  await updateDoc(propRef, safeUpdates);
+  return { id, ...existingData, ...safeUpdates };
+}
+
+/**
+ * Delete a property listing from Cloud Firestore
+ * @param {string} id
+ * @returns {Promise<boolean>}
+ */
+export async function deleteAgentProperty(id) {
+  if (!isFirebaseConfigured || !agentDb || !id) {
+    throw new Error('Firebase configuration or property ID missing.');
+  }
+
+  const currentUid = agentAuth?.currentUser?.uid;
+  if (!currentUid) {
+    throw new Error('You must be signed in to delete listings.');
+  }
+
+  const propRef = doc(agentDb, 'properties', id);
+  const snap = await getDoc(propRef);
+  if (!snap.exists()) return true;
+
+  if (snap.data().createdByUid !== currentUid) {
+    throw new Error('Security Error: You are only permitted to delete your own listings.');
+  }
+
+  await deleteDoc(propRef);
+  return true;
+}
+
+/**
+ * Fast publication status transition (draft -> pending / published)
+ * @param {string} id
+ * @param {string} status ('published' | 'pending' | 'draft' | 'rejected')
+ */
+export async function updatePropertyPublicationStatus(id, status) {
+  return updateAgentProperty(id, {
+    publicationStatus: status,
+    isPublished: status === 'published',
+    rejectionReason: status === 'rejected' ? 'Editorial compliance review required.' : null,
+  });
+}
+
+// ==========================================
+// 3. INQUIRIES MANAGEMENT
+// ==========================================
+
+/**
+ * Fetch client inquiries directed to the authenticated advisor
+ * @param {Object} options { search, status }
+ * @returns {Promise<Array>} List of inquiry records
+ */
+export async function getAgentInquiries({ search = '', status = 'all' } = {}) {
+  const currentUid = agentAuth?.currentUser?.uid;
+  if (!isFirebaseConfigured || !agentDb || !currentUid) {
+    return [];
+  }
+
+  try {
+    const q = query(
+      collection(agentDb, 'inquiries'),
+      where('advisorUid', '==', currentUid)
+    );
+    const snap = await getDocs(q);
+    let inquiries = [];
+
+    snap.forEach((docSnap) => {
+      const d = docSnap.data();
+      inquiries.push({
+        id: docSnap.id,
+        ...d,
+        date: d.createdAt || d.date || new Date().toISOString(),
+        clientName: d.clientName || d.name || 'Client',
+        clientEmail: d.clientEmail || d.senderEmail || 'N/A',
+        clientPhone: d.clientPhone || d.phone || '',
+        status: d.status || 'new',
+      });
+    });
+
+    if (status && status !== 'all') {
+      inquiries = inquiries.filter((i) => i.status === status);
+    }
+
+    if (search && search.trim()) {
+      const qText = search.trim().toLowerCase();
+      inquiries = inquiries.filter(
+        (i) =>
+          (i.clientName || '').toLowerCase().includes(qText) ||
+          (i.clientEmail || '').toLowerCase().includes(qText) ||
+          (i.propertyTitle || '').toLowerCase().includes(qText) ||
+          (i.message || '').toLowerCase().includes(qText)
+      );
+    }
+
+    inquiries.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+    return inquiries;
+  } catch (err) {
+    console.error('[AgentPortalService] Failed to load inquiries:', err);
+    return [];
+  }
+}
+
+/**
+ * Real-time listener for client inquiries
+ * @param {Function} callback - (inquiries: Array) => void
+ * @param {Object} options
+ * @returns {Function} Unsubscribe function
+ */
+export function subscribeAgentInquiries(callback, { search = '', status = 'all' } = {}) {
+  const currentUid = agentAuth?.currentUser?.uid;
+  if (!isFirebaseConfigured || !agentDb || !currentUid) {
+    callback([]);
+    return () => {};
+  }
+
+  const q = query(
+    collection(agentDb, 'inquiries'),
+    where('advisorUid', '==', currentUid)
+  );
+
+  return onSnapshot(
+    q,
+    (snap) => {
+      let inquiries = [];
+      snap.forEach((docSnap) => {
+        const d = docSnap.data();
+        inquiries.push({
+          id: docSnap.id,
+          ...d,
+          date: d.createdAt || d.date || new Date().toISOString(),
+          clientName: d.clientName || d.name || 'Client',
+          clientEmail: d.clientEmail || d.senderEmail || 'N/A',
+          clientPhone: d.clientPhone || d.phone || '',
+          status: d.status || 'new',
+        });
+      });
+
+      if (status && status !== 'all') {
+        inquiries = inquiries.filter((i) => i.status === status);
+      }
+      if (search && search.trim()) {
+        const qText = search.trim().toLowerCase();
+        inquiries = inquiries.filter(
+          (i) =>
+            (i.clientName || '').toLowerCase().includes(qText) ||
+            (i.clientEmail || '').toLowerCase().includes(qText) ||
+            (i.propertyTitle || '').toLowerCase().includes(qText) ||
+            (i.message || '').toLowerCase().includes(qText)
+        );
+      }
+
+      inquiries.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+      callback(inquiries);
+    },
+    (err) => {
+      console.warn('[AgentPortalService] Inquiries listener warning:', err);
+      callback([]);
+    }
+  );
+}
+
+/**
+ * Fetch single inquiry by ID
+ * @param {string} id
+ * @returns {Promise<Object|null>}
+ */
+export async function getInquiryById(id) {
+  if (!isFirebaseConfigured || !agentDb || !id) return null;
+
+  try {
+    const docRef = doc(agentDb, 'inquiries', id);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const d = snap.data();
+      return {
+        id: snap.id,
+        ...d,
+        date: d.createdAt || d.date || new Date().toISOString(),
+        clientName: d.clientName || d.name || 'Client',
+        clientEmail: d.clientEmail || d.senderEmail || 'N/A',
+        clientPhone: d.clientPhone || d.phone || '',
+      };
+    }
+    return null;
+  } catch (err) {
+    console.error('[AgentPortalService] Failed to load inquiry:', err);
+    return null;
+  }
+}
+
+/**
+ * Update client inquiry status and agent editorial notes
+ * @param {string} id
+ * @param {string} newStatus ('new' | 'contacted' | 'closed')
+ * @param {string} notes
+ * @returns {Promise<Object>}
+ */
+export async function updateInquiryStatus(id, newStatus, notes = '') {
+  if (!isFirebaseConfigured || !agentDb || !id) {
+    throw new Error('Firebase configuration or inquiry ID missing.');
+  }
+
+  const docRef = doc(agentDb, 'inquiries', id);
+  const nowIso = new Date().toISOString();
+  const updatePayload = {
+    status: newStatus,
+    updatedAt: nowIso,
+  };
+  if (notes !== undefined) {
+    updatePayload.agentNotes = notes;
+  }
+
+  await updateDoc(docRef, updatePayload);
+  const snap = await getDoc(docRef);
+  const d = snap.data();
+  return {
+    id: snap.id,
+    ...d,
+    date: d.createdAt || d.date || nowIso,
+    clientName: d.clientName || d.name || 'Client',
+    clientEmail: d.clientEmail || d.senderEmail || 'N/A',
+    clientPhone: d.clientPhone || d.phone || '',
+  };
+}
+
+// ==========================================
+// 4. AGENT PROFILE MANAGEMENT
+// ==========================================
+
+/**
+ * Fetch advisor profile directly from Cloud Firestore (/users/{uid})
+ * @returns {Promise<Object|null>}
+ */
+export async function getAgentProfile() {
+  const currentUid = agentAuth?.currentUser?.uid;
+  if (!isFirebaseConfigured || !agentDb || !currentUid) return null;
+
+  try {
+    const userRef = doc(agentDb, 'users', currentUid);
+    const snap = await getDoc(userRef);
+    if (snap.exists()) {
+      const d = snap.data();
+      return {
+        id: snap.id,
+        uid: currentUid,
+        name: d.name || agentAuth.currentUser.displayName || 'Advisor',
+        email: d.email || agentAuth.currentUser.email || '',
+        phone: d.phone || '',
+        avatar: d.avatar || '',
+        title: d.title || 'Senior Luxury Property Consultant',
+        agency: d.agency || d.requestedAgency || 'EstateVista Advisory Services',
+        experienceYears: Number(d.experienceYears) || 5,
+        bio: d.bio || '',
+        serviceLocations: Array.isArray(d.serviceLocations) && d.serviceLocations.length > 0
+          ? d.serviceLocations
+          : ['Mumbai', 'Bandra West'],
+        specialties: Array.isArray(d.specialties) && d.specialties.length > 0
+          ? d.specialties
+          : ['Luxury Penthouses', 'Heritage Villas'],
+        licenseNumber: d.licenseNumber || '',
+        ...d,
+      };
+    }
+    return null;
+  } catch (err) {
+    console.error('[AgentPortalService] Failed to load advisor profile:', err);
+    return null;
+  }
+}
+
+/**
+ * Update advisor profile in Cloud Firestore (/users/{uid})
+ * Preserves role and authorization fields immutability.
+ * @param {Object} profileUpdates
+ * @returns {Promise<Object>}
+ */
+export async function updateAgentProfile(profileUpdates) {
+  const currentUid = agentAuth?.currentUser?.uid;
+  if (!isFirebaseConfigured || !agentDb || !currentUid) {
+    throw new Error('Authentication required to update advisor profile.');
+  }
+
+  const userRef = doc(agentDb, 'users', currentUid);
+  const nowIso = new Date().toISOString();
+
+  const safeUpdates = {
+    name: profileUpdates.name?.trim() || '',
+    phone: profileUpdates.phone?.trim() || '',
+    avatar: profileUpdates.avatar || '',
+    title: profileUpdates.title?.trim() || '',
+    agency: profileUpdates.agency?.trim() || '',
+    experienceYears: Number(profileUpdates.experienceYears) || 0,
+    bio: profileUpdates.bio?.trim() || '',
+    serviceLocations: Array.isArray(profileUpdates.serviceLocations) ? profileUpdates.serviceLocations : [],
+    specialties: Array.isArray(profileUpdates.specialties) ? profileUpdates.specialties : [],
+    updatedAt: nowIso,
+  };
+
+  await setDoc(userRef, safeUpdates, { merge: true });
+  const snap = await getDoc(userRef);
+  return { id: snap.id, ...snap.data() };
+}
+
+// ==========================================
+// 5. AGENT SETTINGS MANAGEMENT
+// ==========================================
+
+export async function getAgentSettings() {
+  const currentUid = agentAuth?.currentUser?.uid;
+  if (!isFirebaseConfigured || !agentDb || !currentUid) {
+    return getDefaultSettings();
+  }
+
+  try {
+    const userRef = doc(agentDb, 'users', currentUid);
+    const snap = await getDoc(userRef);
+    if (snap.exists() && snap.data().settings) {
+      return { ...getDefaultSettings(), ...snap.data().settings };
+    }
+  } catch (err) {
+    console.warn('[AgentPortalService] Could not read settings from Firestore:', err);
+  }
+  return getDefaultSettings();
+}
+
+export async function updateAgentSettings(newSettings) {
+  const currentUid = agentAuth?.currentUser?.uid;
+  if (!isFirebaseConfigured || !agentDb || !currentUid) {
+    throw new Error('Authentication required to save settings.');
+  }
+
+  const userRef = doc(agentDb, 'users', currentUid);
+  await setDoc(
+    userRef,
+    {
+      settings: newSettings,
+      updatedAt: new Date().toISOString(),
+    },
+    { merge: true }
+  );
+  return newSettings;
+}
+
+function getDefaultSettings() {
+  return {
+    emailNotifications: true,
+    inquiryAlerts: true,
+    weeklyDigest: true,
+    instantSms: false,
+    publicProfileVisible: true,
+    showPhonePublicly: true,
+    currencyDisplay: 'INR',
+    areaUnit: 'sqFt',
+  };
+}
+
+// ==========================================
+// 6. FIREBASE STORAGE MEDIA UPLOADER
+// ==========================================
+
+/**
+ * Upload an image file to Firebase Storage under the advisor's directory
+ * @param {File|Blob} file
+ * @param {string} [folder='properties']
+ * @returns {Promise<string>} Public download URL
+ */
+export async function uploadAgentMedia(file, folder = 'properties') {
+  if (!isFirebaseConfigured || !agentStorage) {
+    throw new Error('Firebase Storage is not configured.');
+  }
+
+  const currentUid = agentAuth?.currentUser?.uid;
+  if (!currentUid) {
+    throw new Error('Authentication required to upload media.');
+  }
+
+  const timestamp = Date.now();
+  const safeName = (file.name || 'upload.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const path = `${folder}/${currentUid}/${timestamp}_${safeName}`;
+  const storageRef = ref(agentStorage, path);
+
+  const snapshot = await uploadBytes(storageRef, file);
+  const downloadUrl = await getDownloadURL(snapshot.ref);
+  return downloadUrl;
+}
+
+/**
+ * Reset helper for test suites (no-op in production Cloud Firestore mode)
+ */
+export async function resetDemoPortalData() {
+  return Promise.resolve(true);
+}
