@@ -58,6 +58,11 @@ export default function AdminLayout() {
     setIsMobileNavOpen(false);
   }, [location.pathname]);
 
+  const pendingAppsCount = stats?.applications?.pending ?? stats?.pendingApplications ?? 0;
+  const pendingPropsCount = stats?.properties?.pending ?? stats?.pendingModeration ?? 0;
+  const totalUsersCount = stats?.users?.total ?? stats?.totalUsers ?? 0;
+  const newInquiriesCount = stats?.inquiries?.new ?? stats?.newInquiries ?? 0;
+
   const navItems = [
     {
       name: 'Overview',
@@ -69,28 +74,28 @@ export default function AdminLayout() {
       name: 'Advisor Applications',
       path: '/admin/advisor-applications',
       icon: ShieldCheck,
-      badge: stats?.pendingApplications ? `${stats.pendingApplications} Pending` : null,
+      badge: pendingAppsCount > 0 ? `${pendingAppsCount} Pending` : null,
       badgeVariant: 'amber',
     },
     {
       name: 'Properties Moderation',
       path: '/admin/properties',
       icon: Building2,
-      badge: stats?.pendingModeration ? `${stats.pendingModeration} Review` : null,
+      badge: pendingPropsCount > 0 ? `${pendingPropsCount} Review` : null,
       badgeVariant: 'blue',
     },
     {
       name: 'User Management',
       path: '/admin/users',
       icon: Users,
-      badge: stats?.totalUsers ? `${stats.totalUsers}` : null,
+      badge: totalUsersCount > 0 ? `${totalUsersCount}` : null,
       badgeVariant: 'gray',
     },
     {
       name: 'Client Inquiries',
       path: '/admin/inquiries',
       icon: MessageSquare,
-      badge: stats?.newInquiries ? `${stats.newInquiries} New` : null,
+      badge: newInquiriesCount > 0 ? `${newInquiriesCount} New` : null,
       badgeVariant: 'emerald',
     },
     {

@@ -98,7 +98,7 @@ export default function AgentSettings() {
       )}
 
       <form onSubmit={handleSave} className="space-y-6">
-        {/* Section 1: Notification Preferences */}
+        {/* Section 1: Communication Preferences */}
         <div className="bg-white rounded-2xl border border-sage p-6 shadow-soft space-y-4">
           <div className="flex items-center gap-2.5 pb-3 border-b border-sage/60">
             <div className="w-8 h-8 rounded-lg bg-forest/10 text-forest flex items-center justify-center">
@@ -106,10 +106,10 @@ export default function AgentSettings() {
             </div>
             <div>
               <h3 className="font-serif text-lg font-bold text-charcoal">
-                1. Notification Preferences
+                1. Client Inquiry Dispatch
               </h3>
               <p className="text-xs text-mutedText">
-                Configure dispatch triggers and channels for client inquiries
+                Configure direct notifications when clients submit private walkthrough inquiries
               </p>
             </div>
           </div>
@@ -118,50 +118,16 @@ export default function AgentSettings() {
             <div className="py-3 flex items-center justify-between">
               <div>
                 <p className="text-xs font-bold text-charcoal">
-                  Email Alerts for New Inquiries
+                  Email Dispatch for Direct Inquiries
                 </p>
                 <p className="text-[11px] text-mutedText">
-                  Receive instant dispatch when a potential buyer requests a private walkthrough.
+                  Receive email alerts at your registered advisor email when a prospective client inquires about your listings.
                 </p>
               </div>
               <input
                 type="checkbox"
-                checked={settings.emailNotifications}
+                checked={Boolean(settings.emailNotifications)}
                 onChange={() => handleToggle('emailNotifications')}
-                className="w-4 h-4 rounded text-forest focus:ring-forest border-sage"
-              />
-            </div>
-
-            <div className="py-3 flex items-center justify-between">
-              <div>
-                <p className="text-xs font-bold text-charcoal">
-                  Instant SMS / WhatsApp Alerts
-                </p>
-                <p className="text-[11px] text-mutedText">
-                  Send mobile push notifications for urgent verified leads.
-                </p>
-              </div>
-              <input
-                type="checkbox"
-                checked={settings.instantSms}
-                onChange={() => handleToggle('instantSms')}
-                className="w-4 h-4 rounded text-forest focus:ring-forest border-sage"
-              />
-            </div>
-
-            <div className="py-3 flex items-center justify-between">
-              <div>
-                <p className="text-xs font-bold text-charcoal">
-                  Weekly Performance Digest
-                </p>
-                <p className="text-[11px] text-mutedText">
-                  Summary email with listing impressions, search rankings, and lead conversion rates.
-                </p>
-              </div>
-              <input
-                type="checkbox"
-                checked={settings.weeklyDigest}
-                onChange={() => handleToggle('weeklyDigest')}
                 className="w-4 h-4 rounded text-forest focus:ring-forest border-sage"
               />
             </div>

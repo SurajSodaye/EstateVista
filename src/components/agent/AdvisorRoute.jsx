@@ -20,7 +20,15 @@ import Button from '../common/Button';
  * - Normal customers (denied access) -> /agent/portal?reason=access_denied
  */
 export default function AdvisorRoute({ children }) {
-  const { agentUser, agentProfileError, agentLoading, isAdvisor, isPendingAdvisor } = useAgentAuth();
+  const {
+    agentUser,
+    agentProfileError,
+    agentLoading,
+    isAdvisor,
+    isPendingAdvisor,
+    isRejectedAdvisor,
+    isSuspendedAdvisor,
+  } = useAgentAuth();
   const location = useLocation();
 
   // 1. Prevent redirection flicker while Firebase initializes
@@ -78,12 +86,12 @@ export default function AdvisorRoute({ children }) {
     );
   }
 
-  // 4. User has a pending advisor application under review
-  if (isPendingAdvisor) {
+  // 4. User has a pending, rejected, or suspended advisor application status
+  if (isPendingAdvisor || isRejectedAdvisor || isSuspendedAdvisor) {
     return <Navigate to="/agent/pending" state={{ from: location }} replace />;
   }
 
-  // 4. Logged-in customer without approved advisor credentials
+  // 5. Logged-in customer without approved advisor credentials (cannot bypass via manual URL)
   if (!isAdvisor) {
     return (
       <Navigate

@@ -27,14 +27,31 @@ export default function AgentDashboard() {
   const { agentUser, agentProfile } = useAgentAuth();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [isRetrying, setIsRetrying] = useState(false);
+
+  const loadStats = () => {
+    setError(null);
+    setLoading(true);
+    const unsubscribe = subscribeAgentDashboardStats(
+      (data) => {
+        setStats(data);
+        setLoading(false);
+        setError(null);
+        setIsRetrying(false);
+      },
+      (err) => {
+        console.error('Dashboard stats subscription error:', err);
+        setError(err.message || 'Unable to load live dashboard statistics from Cloud Firestore.');
+        setLoading(false);
+        setIsRetrying(false);
+      }
+    );
+    return unsubscribe;
+  };
 
   useEffect(() => {
-    // Subscribe to real-time dashboard statistics
-    const unsubscribe = subscribeAgentDashboardStats((data) => {
-      setStats(data);
-      setLoading(false);
-    });
-
+    const unsubscribe = loadStats();
     return () => {
       if (typeof unsubscribe === 'function') {
         unsubscribe();
@@ -42,8 +59,21 @@ export default function AgentDashboard() {
     };
   }, [agentUser?.uid]);
 
+  const handleRetry = async () => {
+    setIsRetrying(true);
+    setError(null);
+    try {
+      const data = await getAgentDashboardStats();
+      setStats(data);
+    } catch (err) {
+      setError(err.message || 'Failed to refresh statistics.');
+    } finally {
+      setIsRetrying(false);
+    }
+  };
+
   if (loading) {
-    return <LoadingState message="Loading advisor metrics and activity..." />;
+    return <LoadingState message="Loading advisor metrics and activity from Cloud Firestore..." />;
   }
 
   // Format currency helper for Indian format (₹ Cr / Lakh)
@@ -72,12 +102,31 @@ export default function AgentDashboard() {
       case 'rejected':
         return <Badge className="bg-rose-50 text-rose-700 border-rose-200">Needs Revision</Badge>;
       default:
-        return <Badge>{status}</Badge>;
+        return <Badge>{status || 'Draft'}</Badge>;
     }
   };
 
   return (
     <div className="space-y-8">
+      {/* Error Alert with Manual Retry */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-2xl p-4 text-xs text-red-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
+          <div className="flex items-center gap-2.5">
+            <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
+            <span>{error}</span>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRetry}
+            isLoading={isRetrying}
+            className="shrink-0 text-xs"
+          >
+            Retry Sync
+          </Button>
+        </div>
+      )}
+
       {/* Welcome Banner & Quick Actions */}
       <div className="bg-forest text-white rounded-3xl p-6 sm:p-8 relative overflow-hidden shadow-card">
         {/* Subtle decorative background shapes */}
@@ -113,6 +162,30 @@ export default function AgentDashboard() {
         </div>
       </div>
 
+      {/* Empty State Onboarding Card (Shown if portfolio is empty) */}
+      {stats && stats.totalProperties === 0 && (
+        <div className="bg-sage-light/60 border border-sage rounded-3xl p-6 sm:p-8 flex flex-col sm:flex-row items-center justify-between gap-6 animate-in fade-in">
+          <div className="flex items-start gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-forest text-gold flex items-center justify-center shrink-0 shadow-sm">
+              <Building2 className="w-6 h-6" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="font-serif text-lg font-bold text-forest">
+                Start Building Your Portfolio
+              </h3>
+              <p className="text-xs sm:text-sm text-charcoal/80 leading-relaxed max-w-xl">
+                You do not have any property listings under your advisor account yet. Create your first listing to submit for editorial review and receive direct inquiries from prospective high-net-worth buyers.
+              </p>
+            </div>
+          </div>
+          <Link to="/agent/properties/new" className="shrink-0 w-full sm:w-auto">
+            <Button variant="primary" size="md" icon={PlusCircle} className="w-full sm:w-auto">
+              Create First Listing
+            </Button>
+          </Link>
+        </div>
+      )}
+
       {/* Primary KPI Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {/* Total Properties */}
@@ -125,10 +198,10 @@ export default function AgentDashboard() {
           </div>
           <div>
             <div className="text-3xl font-serif font-bold text-charcoal">
-              {stats.totalProperties}
+              {stats?.totalProperties || 0}
             </div>
             <div className="mt-1 text-xs text-mutedText flex items-center gap-1">
-              <span>Managed in portal</span>
+              <span>Managed by your account</span>
             </div>
           </div>
         </div>
@@ -143,7 +216,7 @@ export default function AgentDashboard() {
           </div>
           <div>
             <div className="text-3xl font-serif font-bold text-forest">
-              {stats.publishedCount}
+              {stats?.publishedCount || 0}
             </div>
             <div className="mt-1 text-xs text-emerald-700 font-medium">
               Live on public catalog
@@ -161,7 +234,7 @@ export default function AgentDashboard() {
           </div>
           <div>
             <div className="text-3xl font-serif font-bold text-charcoal">
-              {stats.pendingCount}
+              {stats?.pendingCount || 0}
             </div>
             <div className="mt-1 text-xs text-amber-700 font-medium">
               Pending editorial review
@@ -179,7 +252,7 @@ export default function AgentDashboard() {
           </div>
           <div>
             <div className="text-3xl font-serif font-bold text-charcoal">
-              {stats.draftCount}
+              {stats?.draftCount || 0}
             </div>
             <div className="mt-1 text-xs text-mutedText">
               Unpublished listings
@@ -197,8 +270,8 @@ export default function AgentDashboard() {
           </div>
           <div>
             <div className="text-3xl font-serif font-bold text-forest flex items-baseline gap-2">
-              <span>{stats.totalInquiries}</span>
-              {stats.newInquiriesCount > 0 && (
+              <span>{stats?.totalInquiries || 0}</span>
+              {(stats?.newInquiriesCount || 0) > 0 && (
                 <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gold/20 text-forest border border-gold/40">
                   {stats.newInquiriesCount} new
                 </span>
@@ -211,17 +284,17 @@ export default function AgentDashboard() {
         </div>
       </div>
 
-      {/* Analytical Visualizations (Sample Activity) */}
+      {/* Analytical Visualizations (Live Activity) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Monthly Inquiries Trend (Clean SVG Chart) */}
+        {/* Monthly Inquiries & Portfolio Trend (Clean SVG Chart) */}
         <div className="lg:col-span-2 bg-white rounded-2xl p-6 border border-sage shadow-soft">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-6">
             <div>
               <h3 className="font-serif text-lg font-bold text-charcoal">
-                Client Inquiries & Engagement Trend
+                Portfolio Growth & Inquiries Activity
               </h3>
               <p className="text-xs text-mutedText">
-                Inquiries and engagement activity over the last 6 months
+                Real client inquiries and new listings added over the last 6 months
               </p>
             </div>
             <div className="flex items-center gap-3 text-xs">
@@ -230,31 +303,34 @@ export default function AgentDashboard() {
                 Inquiries
               </span>
               <span className="flex items-center gap-1.5 text-mutedText font-medium">
-                <span className="w-3 h-3 rounded bg-sage inline-block" />
-                Property Views (×20)
+                <span className="w-3 h-3 rounded bg-gold inline-block" />
+                Listings Added
               </span>
             </div>
           </div>
 
           {/* SVG Bar Chart */}
           <div className="h-56 w-full flex items-end justify-between gap-2 sm:gap-6 pt-4 border-b border-sage/60 pb-2">
-            {stats.monthlyActivity.map((item) => {
-              const maxInq = 50;
-              const heightPercent = Math.min(100, Math.round((item.inquiries / maxInq) * 100));
-              const viewsPercent = Math.min(100, Math.round((item.views / 1200) * 100));
+            {stats?.monthlyActivity?.map((item) => {
+              const maxCount = Math.max(
+                ...stats.monthlyActivity.map((m) => Math.max(m.inquiries, m.listings || 0)),
+                5
+              );
+              const inqPercent = Math.min(100, Math.round((item.inquiries / maxCount) * 100));
+              const listPercent = Math.min(100, Math.round(((item.listings || 0) / maxCount) * 100));
 
               return (
                 <div key={item.month} className="flex-1 flex flex-col items-center gap-2 h-full justify-end group">
                   <div className="w-full flex items-end justify-center gap-1 sm:gap-2 h-full">
-                    {/* Views Bar */}
+                    {/* Listings Bar */}
                     <div
-                      style={{ height: `${viewsPercent}%` }}
-                      className="w-1/2 sm:w-5 max-w-[20px] bg-sage rounded-t-md transition-all duration-300 group-hover:bg-sage-dark relative"
-                      title={`${item.views} Listing Views`}
+                      style={{ height: `${Math.max(listPercent, item.listings ? 8 : 0)}%` }}
+                      className="w-1/2 sm:w-5 max-w-[20px] bg-gold/70 rounded-t-md transition-all duration-300 group-hover:bg-gold relative"
+                      title={`${item.listings || 0} Listings Added`}
                     />
                     {/* Inquiries Bar */}
                     <div
-                      style={{ height: `${heightPercent}%` }}
+                      style={{ height: `${Math.max(inqPercent, item.inquiries ? 8 : 0)}%` }}
                       className="w-1/2 sm:w-5 max-w-[20px] bg-forest rounded-t-md transition-all duration-300 group-hover:bg-forest-light relative shadow-xs"
                       title={`${item.inquiries} Inquiries`}
                     />
@@ -269,7 +345,7 @@ export default function AgentDashboard() {
 
           <div className="mt-4 flex items-center justify-between text-xs text-mutedText">
             <span>Portfolio engagement activity</span>
-            <span className="text-emerald-700 font-medium">Synchronized with Firestore</span>
+            <span className="text-emerald-700 font-medium">✓ Scoped to {agentUser?.email}</span>
           </div>
         </div>
 
@@ -398,9 +474,12 @@ export default function AgentDashboard() {
                 <div key={prop.id} className="py-3.5 flex items-center justify-between gap-3 group">
                   <div className="flex items-center gap-3 min-w-0">
                     <img
-                      src={prop.imageUrls?.[0] || 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=150&q=80'}
+                      src={prop.imageUrls?.[0] || prop.images?.[0] || 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=150&q=80'}
                       alt={prop.title}
                       className="w-14 h-14 rounded-xl object-cover shrink-0 border border-sage"
+                      onError={(e) => {
+                        e.currentTarget.src = 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=150&q=80';
+                      }}
                     />
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 mb-0.5">

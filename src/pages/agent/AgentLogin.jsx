@@ -27,6 +27,8 @@ export default function AgentLogin() {
     agentProfile,
     isAdvisor,
     isPendingAdvisor,
+    isRejectedAdvisor,
+    isSuspendedAdvisor,
     agentLogin,
     agentLogout,
     isFirebaseConfigured,
@@ -88,8 +90,8 @@ export default function AgentLogin() {
     );
   }
 
-  // If signed in but application is pending review
-  if (agentUser && isPendingAdvisor) {
+  // If signed in but application is pending, rejected, or suspended
+  if (agentUser && (isPendingAdvisor || isRejectedAdvisor || isSuspendedAdvisor)) {
     return (
       <div className="min-h-[80vh] flex items-center justify-center px-4 py-12">
         <div className="max-w-md w-full bg-white rounded-3xl p-8 border border-amber-200 shadow-card text-center space-y-5">
@@ -98,13 +100,13 @@ export default function AgentLogin() {
           </div>
           <div className="space-y-1">
             <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-amber-100 text-amber-800">
-              Application In Progress
+              {isSuspendedAdvisor ? 'Account Suspended' : isRejectedAdvisor ? 'Application Reviewed' : 'Application In Progress'}
             </span>
             <h2 className="font-serif text-2xl font-bold text-charcoal pt-2">
-              Application Under Review
+              {isSuspendedAdvisor ? 'Advisor Account Suspended' : isRejectedAdvisor ? 'Application Not Approved' : 'Application Under Review'}
             </h2>
             <p className="text-xs sm:text-sm text-mutedText">
-              Your advisor application for <strong className="text-forest">{agentUser.email}</strong> is currently being evaluated.
+              Advisor account for <strong className="text-forest">{agentUser.email}</strong> status: <strong className="uppercase">{agentProfile?.advisorStatus || 'pending'}</strong>.
             </p>
           </div>
           <div className="flex flex-col gap-3 pt-2">
@@ -115,7 +117,7 @@ export default function AgentLogin() {
               iconPosition="right"
               onClick={() => navigate('/agent/pending')}
             >
-              Check Application Status
+              View Application & Account Status
             </Button>
             <Button
               variant="outline"
@@ -159,7 +161,12 @@ export default function AgentLogin() {
       const { profile } = await agentLogin(formData.email, formData.password);
       if (profile && (profile.role === 'agent' || profile.role === 'admin') && profile.advisorStatus === 'approved') {
         navigate(redirectPath);
-      } else if (profile && profile.advisorStatus === 'pending') {
+      } else if (
+        profile &&
+        (profile.advisorStatus === 'pending' ||
+          profile.advisorStatus === 'rejected' ||
+          profile.advisorStatus === 'suspended')
+      ) {
         navigate('/agent/pending');
       } else {
         navigate('/agent/portal?reason=access_denied');

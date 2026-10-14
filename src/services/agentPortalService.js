@@ -83,7 +83,7 @@ export async function getAgentDashboardStats() {
  * @param {Function} callback - (stats: Object) => void
  * @returns {Function} Unsubscribe function
  */
-export function subscribeAgentDashboardStats(callback) {
+export function subscribeAgentDashboardStats(callback, onError) {
   const currentUid = agentAuth?.currentUser?.uid;
   if (!isFirebaseConfigured || !agentDb || !currentUid) {
     callback(getEmptyDashboardStats());
@@ -111,7 +111,10 @@ export function subscribeAgentDashboardStats(callback) {
       });
       callback(calculateDashboardStats(properties, inquiries));
     },
-    (err) => console.warn('[AgentPortalService] Property stats listener warning:', err)
+    (err) => {
+      console.warn('[AgentPortalService] Property stats listener warning:', err);
+      if (typeof onError === 'function') onError(err);
+    }
   );
 
   const unsubInqs = onSnapshot(
@@ -123,7 +126,10 @@ export function subscribeAgentDashboardStats(callback) {
       });
       callback(calculateDashboardStats(properties, inquiries));
     },
-    (err) => console.warn('[AgentPortalService] Inquiry stats listener warning:', err)
+    (err) => {
+      console.warn('[AgentPortalService] Inquiry stats listener warning:', err);
+      if (typeof onError === 'function') onError(err);
+    }
   );
 
   return () => {
@@ -133,11 +139,13 @@ export function subscribeAgentDashboardStats(callback) {
 }
 
 function calculateDashboardStats(properties, inquiries) {
-  const publishedCount = properties.filter((p) => p.publicationStatus === 'published').length;
+  const publishedCount = properties.filter(
+    (p) => p.publicationStatus === 'published' || (p.isPublished === true && !p.publicationStatus)
+  ).length;
   const draftCount = properties.filter((p) => p.publicationStatus === 'draft').length;
   const pendingCount = properties.filter((p) => p.publicationStatus === 'pending').length;
   const rejectedCount = properties.filter((p) => p.publicationStatus === 'rejected').length;
-  const newInquiriesCount = inquiries.filter((i) => i.status === 'new').length;
+  const newInquiriesCount = inquiries.filter((i) => i.status === 'new' || i.isRead === false).length;
 
   const recentProperties = [...properties]
     .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
@@ -147,7 +155,15 @@ function calculateDashboardStats(properties, inquiries) {
     .sort((a, b) => new Date(b.createdAt || b.date || 0) - new Date(a.createdAt || a.date || 0))
     .slice(0, 5);
 
-  // Dynamic monthly activity calculated from actual inquiries
+  // Check for real property tracking data (view counts or impressions)
+  const hasRealViews = properties.some(
+    (p) => p.viewsCount !== undefined || p.viewCount !== undefined || p.views !== undefined
+  );
+  const totalViews = hasRealViews
+    ? properties.reduce((acc, p) => acc + (Number(p.viewsCount || p.viewCount || p.views) || 0), 0)
+    : null;
+
+  // Dynamic monthly activity calculated from actual inquiries and listing additions
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const now = new Date();
   const monthlyActivity = [];
@@ -159,10 +175,15 @@ function calculateDashboardStats(properties, inquiries) {
       const inqDate = new Date(inq.createdAt || inq.date || 0);
       return inqDate.getFullYear() === year && inqDate.getMonth() === d.getMonth();
     }).length;
+    const mListings = properties.filter((p) => {
+      const pDate = new Date(p.createdAt || 0);
+      return pDate.getFullYear() === year && pDate.getMonth() === d.getMonth();
+    }).length;
+
     monthlyActivity.push({
       month: mName,
       inquiries: mInquiries,
-      views: mInquiries * 20,
+      listings: mListings,
     });
   }
 
@@ -174,6 +195,8 @@ function calculateDashboardStats(properties, inquiries) {
     rejectedCount,
     totalInquiries: inquiries.length,
     newInquiriesCount,
+    totalViews,
+    hasRealViews,
     recentProperties,
     recentInquiries,
     monthlyActivity,
@@ -190,9 +213,11 @@ function getEmptyDashboardStats() {
     rejectedCount: 0,
     totalInquiries: 0,
     newInquiriesCount: 0,
+    totalViews: null,
+    hasRealViews: false,
     recentProperties: [],
     recentInquiries: [],
-    monthlyActivity: months.map((m) => ({ month: m, inquiries: 0, views: 0 })),
+    monthlyActivity: months.map((m) => ({ month: m, inquiries: 0, listings: 0 })),
   };
 }
 
@@ -360,23 +385,34 @@ export async function createAgentProperty(propertyData, targetStatus = 'draft') 
     throw new Error('You must be signed in with advisor credentials to create a property.');
   }
 
+  // Non-admins can strictly only create as 'draft' or 'pending' per firestore.rules
+  const publicationStatus = ['draft', 'pending'].includes(targetStatus) ? targetStatus : 'pending';
+
   const nowIso = new Date().toISOString();
   const author = agentAuth.currentUser;
 
+  const rawImages = propertyData.imageUrls !== undefined ? propertyData.imageUrls : (propertyData.images || []);
+  const normalizedImages = Array.isArray(rawImages)
+    ? rawImages.filter((img) => typeof img === 'string' && img.trim())
+    : [];
+
   const payload = {
     ...propertyData,
+    imageUrls: normalizedImages,
+    images: normalizedImages,
+    featuredImage: propertyData.featuredImage || normalizedImages[0] || '',
     price: Number(propertyData.price) || 0,
     areaSqFt: Number(propertyData.areaSqFt) || 0,
     bedrooms: Number(propertyData.bedrooms) || 0,
     bathrooms: Number(propertyData.bathrooms) || 0,
     parkingSlots: Number(propertyData.parkingSlots) || 0,
-    publicationStatus: targetStatus,
-    isPublished: targetStatus === 'published',
+    publicationStatus,
+    isPublished: false, // strictly false for non-admin creation per firestore.rules
     rejectionReason: null,
     createdByUid: currentUid,
     agentId: currentUid,
-    agentName: author.displayName || 'Advisor',
-    agentEmail: author.email || '',
+    agentName: author.displayName || propertyData.agentName || 'Advisor',
+    agentEmail: author.email || propertyData.agentEmail || '',
     createdAt: nowIso,
     updatedAt: nowIso,
   };
@@ -422,15 +458,32 @@ export async function updateAgentProperty(id, updates) {
   delete safeUpdates.createdByUid;
   delete safeUpdates.id;
 
+  if (updates.imageUrls !== undefined || updates.images !== undefined) {
+    const rawImages = updates.imageUrls !== undefined ? updates.imageUrls : updates.images;
+    const normalizedImages = Array.isArray(rawImages)
+      ? rawImages.filter((img) => typeof img === 'string' && img.trim())
+      : [];
+    safeUpdates.imageUrls = normalizedImages;
+    safeUpdates.images = normalizedImages;
+    safeUpdates.featuredImage = updates.featuredImage || normalizedImages[0] || '';
+  }
+
   if (updates.price !== undefined) safeUpdates.price = Number(updates.price) || 0;
   if (updates.areaSqFt !== undefined) safeUpdates.areaSqFt = Number(updates.areaSqFt) || 0;
   if (updates.bedrooms !== undefined) safeUpdates.bedrooms = Number(updates.bedrooms) || 0;
   if (updates.bathrooms !== undefined) safeUpdates.bathrooms = Number(updates.bathrooms) || 0;
   if (updates.parkingSlots !== undefined) safeUpdates.parkingSlots = Number(updates.parkingSlots) || 0;
 
+  // Non-admins cannot self-publish. Material updates or publication requests must stay or transition to 'pending' (or 'draft').
   if (updates.publicationStatus) {
-    safeUpdates.isPublished = updates.publicationStatus === 'published';
+    safeUpdates.publicationStatus = ['draft', 'pending'].includes(updates.publicationStatus)
+      ? updates.publicationStatus
+      : 'pending';
+  } else if (existingData.publicationStatus === 'published') {
+    // If an already published listing was edited by an advisor, reapply moderation
+    safeUpdates.publicationStatus = 'pending';
   }
+  safeUpdates.isPublished = false;
 
   await updateDoc(propRef, safeUpdates);
   return { id, ...existingData, ...safeUpdates };
@@ -464,14 +517,18 @@ export async function deleteAgentProperty(id) {
 }
 
 /**
- * Fast publication status transition (draft -> pending / published)
+ * Fast publication status transition (draft -> pending / move to draft)
+ * Note: Non-admin agents can only submit for review or move to draft.
  * @param {string} id
- * @param {string} status ('published' | 'pending' | 'draft' | 'rejected')
+ * @param {string} status ('pending' | 'draft')
  */
 export async function updatePropertyPublicationStatus(id, status) {
+  if (status === 'published') {
+    throw new Error('Advisors cannot directly self-publish listings. Please submit for administrator review.');
+  }
   return updateAgentProperty(id, {
     publicationStatus: status,
-    isPublished: status === 'published',
+    isPublished: false,
     rejectionReason: status === 'rejected' ? 'Editorial compliance review required.' : null,
   });
 }
@@ -501,9 +558,11 @@ export async function getAgentInquiries({ search = '', status = 'all' } = {}) {
 
     snap.forEach((docSnap) => {
       const d = docSnap.data();
+      const isRead = d.isRead !== undefined ? d.isRead : (d.status !== 'new');
       inquiries.push({
         id: docSnap.id,
         ...d,
+        isRead,
         date: d.createdAt || d.date || new Date().toISOString(),
         clientName: d.clientName || d.name || 'Client',
         clientEmail: d.clientEmail || d.senderEmail || 'N/A',
@@ -513,7 +572,13 @@ export async function getAgentInquiries({ search = '', status = 'all' } = {}) {
     });
 
     if (status && status !== 'all') {
-      inquiries = inquiries.filter((i) => i.status === status);
+      if (status === 'unread') {
+        inquiries = inquiries.filter((i) => i.isRead === false || i.status === 'new');
+      } else if (status === 'read') {
+        inquiries = inquiries.filter((i) => i.isRead === true && i.status !== 'new');
+      } else {
+        inquiries = inquiries.filter((i) => i.status === status);
+      }
     }
 
     if (search && search.trim()) {
@@ -559,9 +624,11 @@ export function subscribeAgentInquiries(callback, { search = '', status = 'all' 
       let inquiries = [];
       snap.forEach((docSnap) => {
         const d = docSnap.data();
+        const isRead = d.isRead !== undefined ? d.isRead : (d.status !== 'new');
         inquiries.push({
           id: docSnap.id,
           ...d,
+          isRead,
           date: d.createdAt || d.date || new Date().toISOString(),
           clientName: d.clientName || d.name || 'Client',
           clientEmail: d.clientEmail || d.senderEmail || 'N/A',
@@ -571,7 +638,13 @@ export function subscribeAgentInquiries(callback, { search = '', status = 'all' 
       });
 
       if (status && status !== 'all') {
-        inquiries = inquiries.filter((i) => i.status === status);
+        if (status === 'unread') {
+          inquiries = inquiries.filter((i) => i.isRead === false || i.status === 'new');
+        } else if (status === 'read') {
+          inquiries = inquiries.filter((i) => i.isRead === true && i.status !== 'new');
+        } else {
+          inquiries = inquiries.filter((i) => i.status === status);
+        }
       }
       if (search && search.trim()) {
         const qText = search.trim().toLowerCase();
@@ -639,6 +712,7 @@ export async function updateInquiryStatus(id, newStatus, notes = '') {
   const nowIso = new Date().toISOString();
   const updatePayload = {
     status: newStatus,
+    isRead: newStatus !== 'new',
     updatedAt: nowIso,
   };
   if (notes !== undefined) {
@@ -651,10 +725,44 @@ export async function updateInquiryStatus(id, newStatus, notes = '') {
   return {
     id: snap.id,
     ...d,
+    isRead: updatePayload.isRead,
     date: d.createdAt || d.date || nowIso,
     clientName: d.clientName || d.name || 'Client',
     clientEmail: d.clientEmail || d.senderEmail || 'N/A',
     clientPhone: d.clientPhone || d.phone || '',
+  };
+}
+
+/**
+ * Mark client inquiry as read or unread
+ * @param {string} id
+ * @param {boolean} isRead
+ * @returns {Promise<Object>}
+ */
+export async function markInquiryReadStatus(id, isRead = true) {
+  if (!isFirebaseConfigured || !agentDb || !id) {
+    throw new Error('Firebase configuration or inquiry ID missing.');
+  }
+
+  const docRef = doc(agentDb, 'inquiries', id);
+  const nowIso = new Date().toISOString();
+  const updatePayload = {
+    isRead: Boolean(isRead),
+    updatedAt: nowIso,
+  };
+
+  // If marked unread, optionally align status if closed/contacted
+  if (!isRead) {
+    updatePayload.status = 'new';
+  }
+
+  await updateDoc(docRef, updatePayload);
+  const snap = await getDoc(docRef);
+  const d = snap.data();
+  return {
+    id: snap.id,
+    ...d,
+    isRead: Boolean(isRead),
   };
 }
 
@@ -779,9 +887,6 @@ export async function updateAgentSettings(newSettings) {
 function getDefaultSettings() {
   return {
     emailNotifications: true,
-    inquiryAlerts: true,
-    weeklyDigest: true,
-    instantSms: false,
     publicProfileVisible: true,
     showPhonePublicly: true,
     currencyDisplay: 'INR',
@@ -801,7 +906,9 @@ function getDefaultSettings() {
  */
 export async function uploadAgentMedia(file, folder = 'properties') {
   if (!isFirebaseConfigured || !agentStorage) {
-    throw new Error('Firebase Storage is not configured.');
+    throw new Error(
+      'Firebase Cloud Storage is not configured or not yet enabled. Open your Firebase Console (Build > Storage > Get Started) to activate your storage bucket.'
+    );
   }
 
   const currentUid = agentAuth?.currentUser?.uid;
@@ -809,14 +916,34 @@ export async function uploadAgentMedia(file, folder = 'properties') {
     throw new Error('Authentication required to upload media.');
   }
 
+  if (!file.type || !file.type.startsWith('image/')) {
+    throw new Error('Invalid file type: Only photographic images (JPEG, PNG, WebP) are accepted.');
+  }
+
+  const maxSize = folder === 'avatars' ? 5 * 1024 * 1024 : 10 * 1024 * 1024;
+  if (file.size > maxSize) {
+    throw new Error(`File exceeds maximum allowed size of ${folder === 'avatars' ? '5MB' : '10MB'}.`);
+  }
+
   const timestamp = Date.now();
   const safeName = (file.name || 'upload.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
   const path = `${folder}/${currentUid}/${timestamp}_${safeName}`;
   const storageRef = ref(agentStorage, path);
 
-  const snapshot = await uploadBytes(storageRef, file);
-  const downloadUrl = await getDownloadURL(snapshot.ref);
-  return downloadUrl;
+  try {
+    const snapshot = await uploadBytes(storageRef, file);
+    const downloadUrl = await getDownloadURL(snapshot.ref);
+    return downloadUrl;
+  } catch (err) {
+    console.error('[AgentPortalService] Storage upload failed:', err);
+    if (err?.code === 'storage/unauthorized') {
+      throw new Error('Storage Access Denied: Please verify your Firebase Storage security rules.');
+    }
+    if (err?.code === 'storage/bucket-not-found' || err?.message?.includes('bucket')) {
+      throw new Error('Firebase Storage bucket not found. Ensure Cloud Storage is activated in Firebase Console.');
+    }
+    throw new Error(err.message || 'Failed to upload photo to Firebase Cloud Storage.');
+  }
 }
 
 /**

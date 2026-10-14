@@ -15,13 +15,17 @@ import {
 } from 'lucide-react';
 import Button from '../../components/common/Button';
 import { useAdminAuth } from '../../context/AdminAuthContext';
-import { getFirestoreAdminAuditLogs } from '../../services/adminFirestoreService';
+import {
+  getFirestoreAdminAuditLogs,
+  updateFirestoreAdminPreferences,
+} from '../../services/adminFirestoreService';
 
 export default function AdminSettings() {
   const { adminUser, adminProfile, isFirebaseConfigured } = useAdminAuth();
   const currentUser = adminUser;
   const userProfile = adminProfile;
   const [auditLogs, setAuditLogs] = useState([]);
+  const [logsError, setLogsError] = useState(null);
   const [currencyFormat, setCurrencyFormat] = useState(() => {
     const saved = localStorage.getItem('estatevista_admin_prefs');
     return saved ? JSON.parse(saved).currencyFormat || 'inr_cr' : 'inr_cr';
@@ -32,14 +36,32 @@ export default function AdminSettings() {
   });
   const [notification, setNotification] = useState('');
   const [loadingLogs, setLoadingLogs] = useState(false);
+  const [savingPrefs, setSavingPrefs] = useState(false);
+
+  // Synchronize preferences from admin profile if available
+  useEffect(() => {
+    if (adminProfile?.adminPreferences) {
+      if (adminProfile.adminPreferences.currencyFormat) {
+        setCurrencyFormat(adminProfile.adminPreferences.currencyFormat);
+      }
+      if (adminProfile.adminPreferences.pageSize) {
+        setPageSize(adminProfile.adminPreferences.pageSize);
+      }
+    }
+  }, [adminProfile]);
 
   const loadLogs = async () => {
     setLoadingLogs(true);
+    setLogsError(null);
     try {
       const logs = await getFirestoreAdminAuditLogs(50);
       setAuditLogs(logs);
+      if (logs.queryError) {
+        setLogsError(logs.queryError);
+      }
     } catch (err) {
       console.warn('Failed to load audit logs:', err);
+      setLogsError({ message: err.message || 'Failed to retrieve audit trail' });
     } finally {
       setLoadingLogs(false);
     }
@@ -49,12 +71,37 @@ export default function AdminSettings() {
     loadLogs();
   }, []);
 
-  const handleSavePreferences = (e) => {
+  const formatAuditTimestamp = (rawTs) => {
+    if (!rawTs) return '—';
+    try {
+      if (typeof rawTs?.toDate === 'function') {
+        return rawTs.toDate().toLocaleString();
+      }
+      if (typeof rawTs?.seconds === 'number') {
+        return new Date(rawTs.seconds * 1000).toLocaleString();
+      }
+      const d = new Date(rawTs);
+      if (isNaN(d.getTime())) return '—';
+      return d.toLocaleString();
+    } catch {
+      return '—';
+    }
+  };
+
+  const handleSavePreferences = async (e) => {
     e.preventDefault();
-    localStorage.setItem(
-      'estatevista_admin_prefs',
-      JSON.stringify({ currencyFormat, pageSize })
-    );
+    setSavingPrefs(true);
+    const prefs = { currencyFormat, pageSize };
+
+    // 1. Local backup
+    localStorage.setItem('estatevista_admin_prefs', JSON.stringify(prefs));
+
+    // 2. Persist in Cloud Firestore under /users/{adminUid}
+    if (adminUser?.uid) {
+      await updateFirestoreAdminPreferences(adminUser.uid, prefs);
+    }
+
+    setSavingPrefs(false);
     setNotification('Administrative console preferences saved successfully.');
     setTimeout(() => setNotification(''), 4000);
   };
@@ -294,7 +341,7 @@ export default function AdminSettings() {
             Refresh Audit Logs
           </Button>
 
-          <Button type="submit" variant="primary" size="sm">
+          <Button type="submit" variant="primary" size="sm" isLoading={savingPrefs} disabled={savingPrefs}>
             Save Preferences
           </Button>
         </div>
@@ -323,44 +370,71 @@ export default function AdminSettings() {
           </span>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-ivory border-y border-sage/60 text-mutedText uppercase text-[10px] tracking-wider">
-              <tr>
-                <th className="py-2.5 px-3">Timestamp</th>
-                <th className="py-2.5 px-3">Action</th>
-                <th className="py-2.5 px-3">Target</th>
-                <th className="py-2.5 px-3">Operator</th>
-                <th className="py-2.5 px-3">IP Address</th>
-                <th className="py-2.5 px-3">Details</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-sage/40">
-              {auditLogs.map((log) => (
-                <tr key={log.id} className="hover:bg-ivory/30">
-                  <td className="py-2.5 px-3 text-mutedText font-mono text-[11px] whitespace-nowrap">
-                    {new Date(log.timestamp).toLocaleString()}
-                  </td>
-                  <td className="py-2.5 px-3 font-mono font-bold text-charcoal whitespace-nowrap">
-                    {log.action}
-                  </td>
-                  <td className="py-2.5 px-3 text-charcoal/90 whitespace-nowrap">
-                    {log.target}
-                  </td>
-                  <td className="py-2.5 px-3 text-forest font-semibold whitespace-nowrap">
-                    {log.actorEmail}
-                  </td>
-                  <td className="py-2.5 px-3 font-mono text-[11px] text-mutedText whitespace-nowrap">
-                    {log.ip}
-                  </td>
-                  <td className="py-2.5 px-3 text-mutedText max-w-xs truncate" title={log.details}>
-                    {log.details}
-                  </td>
+        {/* Query Index/Error Notice */}
+        {logsError && (
+          <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2.5 animate-in fade-in">
+            <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold">Audit Query Notice</p>
+              <p className="text-[11px] text-amber-800 mt-0.5">
+                {logsError.message || 'Server index is building or query was completed with unindexed fallback. Audit log may be partial.'}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {loadingLogs ? (
+          <div className="py-12 text-center space-y-2">
+            <div className="w-6 h-6 border-2 border-forest border-t-transparent rounded-full animate-spin mx-auto" />
+            <p className="text-xs text-mutedText">Querying server-side ordered audit logs...</p>
+          </div>
+        ) : auditLogs.length === 0 ? (
+          <div className="py-10 text-center space-y-1">
+            <p className="text-xs font-bold text-charcoal">No Audit Records Found</p>
+            <p className="text-[11px] text-mutedText">
+              Administrative actions will be appended here automatically.
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-ivory border-y border-sage/60 text-mutedText uppercase text-[10px] tracking-wider">
+                <tr>
+                  <th className="py-2.5 px-3">Timestamp</th>
+                  <th className="py-2.5 px-3">Action</th>
+                  <th className="py-2.5 px-3">Target</th>
+                  <th className="py-2.5 px-3">Operator</th>
+                  <th className="py-2.5 px-3">IP Address</th>
+                  <th className="py-2.5 px-3">Details</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-sage/40">
+                {auditLogs.map((log) => (
+                  <tr key={log.id} className="hover:bg-ivory/30">
+                    <td className="py-2.5 px-3 text-mutedText font-mono text-[11px] whitespace-nowrap">
+                      {formatAuditTimestamp(log.timestamp)}
+                    </td>
+                    <td className="py-2.5 px-3 font-mono font-bold text-charcoal whitespace-nowrap">
+                      {log.action}
+                    </td>
+                    <td className="py-2.5 px-3 text-charcoal/90 whitespace-nowrap">
+                      {log.target}
+                    </td>
+                    <td className="py-2.5 px-3 text-forest font-semibold whitespace-nowrap">
+                      {log.actorEmail}
+                    </td>
+                    <td className="py-2.5 px-3 font-mono text-[11px] text-mutedText whitespace-nowrap">
+                      {log.ip}
+                    </td>
+                    <td className="py-2.5 px-3 text-mutedText max-w-xs truncate" title={log.details}>
+                      {log.details}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

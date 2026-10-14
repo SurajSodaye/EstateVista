@@ -1,14 +1,14 @@
 /**
- * EstateVista Admin Console Service
+ * @deprecated
+ * EstateVista Legacy Mock Admin Console Service
  * 
- * ARCHITECTURAL NOTICE:
- * This service manages data for the Executive Admin Portal.
- * Because additional Firestore integration is postponed per project scope:
- * - Read and write mutations are stored in browser localStorage.
- * - Live production collections are neither modified nor overwritten.
- * - When live Firestore integration is approved (Phase 2/3), these functions
- *   will map directly to Firestore collections ('users', 'advisorApplications',
- *   'properties', 'inquiries').
+ * DEPRECATION NOTICE:
+ * This legacy mock/localStorage service has been completely superseded by
+ * `src/services/adminFirestoreService.js` which provides real-time, authenticated,
+ * and security-rule verified Cloud Firestore integration.
+ * 
+ * Verified: No active production components or workflows import from this file.
+ * Retained temporarily for backward reference only.
  */
 
 import { DEMO_PROPERTIES } from '../data/properties.js';

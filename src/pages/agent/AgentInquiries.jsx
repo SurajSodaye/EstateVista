@@ -24,11 +24,13 @@ import {
   getAgentInquiries,
   subscribeAgentInquiries,
   updateInquiryStatus,
+  markInquiryReadStatus,
 } from '../../services/agentPortalService';
 
 export default function AgentInquiries() {
   const [inquiries, setInquiries] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
@@ -39,10 +41,12 @@ export default function AgentInquiries() {
 
   useEffect(() => {
     setLoading(true);
+    setError(null);
     const unsubscribe = subscribeAgentInquiries(
       (data) => {
         setInquiries(data);
         setLoading(false);
+        setError(null);
       },
       { search, status: statusFilter }
     );
@@ -62,7 +66,23 @@ export default function AgentInquiries() {
   const handleStatusChange = async (inquiryId, newStatus) => {
     await updateInquiryStatus(inquiryId, newStatus, editingNotes);
     if (selectedInquiry && selectedInquiry.id === inquiryId) {
-      setSelectedInquiry((prev) => ({ ...prev, status: newStatus }));
+      setSelectedInquiry((prev) => ({
+        ...prev,
+        status: newStatus,
+        isRead: newStatus !== 'new',
+      }));
+    }
+  };
+
+  const handleToggleRead = async (e, inquiryId, newIsRead) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    try {
+      await markInquiryReadStatus(inquiryId, newIsRead);
+      if (selectedInquiry && selectedInquiry.id === inquiryId) {
+        setSelectedInquiry((prev) => ({ ...prev, isRead: newIsRead }));
+      }
+    } catch (err) {
+      console.error('Failed to update read status:', err);
     }
   };
 
@@ -76,21 +96,22 @@ export default function AgentInquiries() {
 
   const statusTabs = [
     { id: 'all', label: 'All Inquiries' },
-    { id: 'new', label: 'New / Unread' },
+    { id: 'unread', label: 'New / Unread' },
     { id: 'contacted', label: 'Contacted' },
     { id: 'closed', label: 'Closed' },
   ];
 
-  const getStatusBadge = (status) => {
+  const getStatusBadge = (status, isRead) => {
+    if (isRead === false || status === 'new') {
+      return <Badge className="bg-amber-100 text-amber-800 border-amber-300 font-bold">● Unread Lead</Badge>;
+    }
     switch (status) {
-      case 'new':
-        return <Badge className="bg-amber-100 text-amber-800 border-amber-300 font-bold">New Lead</Badge>;
       case 'contacted':
         return <Badge className="bg-blue-50 text-blue-800 border-blue-200">Contacted</Badge>;
       case 'closed':
         return <Badge className="bg-emerald-50 text-emerald-800 border-emerald-200">Closed</Badge>;
       default:
-        return <Badge>{status}</Badge>;
+        return <Badge className="bg-slate-100 text-slate-700 border-slate-200">Read</Badge>;
     }
   };
 
@@ -112,6 +133,15 @@ export default function AgentInquiries() {
           <span>Real-Time Cloud Firestore Sync</span>
         </div>
       </div>
+
+      {error && (
+        <div className="p-4 rounded-2xl bg-red-50 border border-red-200 text-xs text-red-700 flex items-center justify-between">
+          <span>{error}</span>
+          <Button variant="outline" size="sm" onClick={() => window.location.reload()} className="text-xs">
+            Retry
+          </Button>
+        </div>
+      )}
 
       {/* Filter and Search Controls */}
       <div className="bg-white rounded-2xl border border-sage p-4 shadow-soft space-y-4">
@@ -166,11 +196,13 @@ export default function AgentInquiries() {
             <div
               key={inq.id}
               onClick={() => handleOpenDetail(inq)}
-              className="p-5 hover:bg-ivory/40 transition-colors cursor-pointer group flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+              className={`p-5 hover:bg-ivory/40 transition-colors cursor-pointer group flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ${
+                inq.isRead === false ? 'bg-amber-50/20' : ''
+              }`}
             >
               <div className="space-y-1.5 min-w-0 flex-1">
                 <div className="flex items-center gap-2.5 flex-wrap">
-                  {getStatusBadge(inq.status)}
+                  {getStatusBadge(inq.status, inq.isRead)}
                   <h4 className="text-sm font-bold text-charcoal group-hover:text-forest transition-colors">
                     {inq.clientName}
                   </h4>
@@ -206,9 +238,19 @@ export default function AgentInquiries() {
                     minute: '2-digit',
                   })}
                 </span>
-                <Button variant="outline" size="sm" className="text-xs">
-                  Review Lead
-                </Button>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={(e) => handleToggleRead(e, inq.id, !inq.isRead)}
+                    className="px-2 py-1 rounded-lg text-[11px] font-semibold text-charcoal/70 hover:text-forest hover:bg-sage/40 transition-colors"
+                    title={inq.isRead ? 'Mark as Unread' : 'Mark as Read'}
+                  >
+                    {inq.isRead ? 'Mark Unread' : 'Mark Read'}
+                  </button>
+                  <Button variant="outline" size="sm" className="text-xs">
+                    Review
+                  </Button>
+                </div>
               </div>
             </div>
           ))}
@@ -231,7 +273,7 @@ export default function AgentInquiries() {
             <div className="flex items-start justify-between pb-4 border-b border-sage/60">
               <div>
                 <div className="flex items-center gap-2 mb-1">
-                  {getStatusBadge(selectedInquiry.status)}
+                  {getStatusBadge(selectedInquiry.status, selectedInquiry.isRead)}
                   <span className="text-[11px] font-semibold text-mutedText">
                     Inquiry ID: {selectedInquiry.id}
                   </span>
@@ -252,14 +294,24 @@ export default function AgentInquiries() {
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setSelectedInquiry(null)}
-                className="p-1.5 rounded-lg text-mutedText hover:text-charcoal hover:bg-sage/40 transition-colors"
-                aria-label="Close dialog"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={(e) => handleToggleRead(e, selectedInquiry.id, !selectedInquiry.isRead)}
+                  className="text-xs"
+                >
+                  {selectedInquiry.isRead ? 'Mark Unread' : 'Mark Read'}
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedInquiry(null)}
+                  className="p-1.5 rounded-lg text-mutedText hover:text-charcoal hover:bg-sage/40 transition-colors"
+                  aria-label="Close dialog"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Property Reference */}

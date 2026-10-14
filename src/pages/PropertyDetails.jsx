@@ -69,7 +69,17 @@ export default function PropertyDetails() {
         ]);
 
         if (!isCancelled) {
-          setAgent(agentData);
+          const resolvedAgent = agentData || (propData.agent ? {
+            id: propData.createdByUid || propData.advisorUid || 'advisor',
+            name: propData.agent.name || 'EstateVista Advisory Consultant',
+            agency: propData.agent.agency || 'EstateVista Advisory Services',
+            email: propData.agent.email || '',
+            phone: propData.agent.phone || '',
+            avatar: propData.agent.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80',
+            experienceYears: propData.agent.experienceYears || 5,
+            propertyCount: 1,
+          } : null);
+          setAgent(resolvedAgent);
           setRelatedProperties(related);
         }
       } catch (err) {

@@ -277,9 +277,12 @@ export default function AgentProperties() {
                     <td className="py-4 px-4 max-w-xs">
                       <div className="flex items-center gap-3">
                         <img
-                          src={prop.imageUrls?.[0] || 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=150&q=80'}
+                          src={prop.imageUrls?.[0] || prop.images?.[0] || 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=150&q=80'}
                           alt={prop.title}
                           className="w-14 h-14 rounded-xl object-cover shrink-0 border border-sage/60"
+                          onError={(e) => {
+                            e.currentTarget.src = 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=150&q=80';
+                          }}
                         />
                         <div className="min-w-0">
                           <h4 className="font-bold text-charcoal group-hover:text-forest transition-colors truncate">
@@ -381,34 +384,30 @@ export default function AgentProperties() {
                           </button>
 
                           {actionMenuPropertyId === prop.id && (
-                            <div className="absolute right-0 mt-1 w-44 bg-white rounded-xl shadow-xl border border-sage p-1.5 z-30 text-left">
+                            <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-xl border border-sage p-1.5 z-30 text-left">
                               <p className="text-[10px] font-bold uppercase text-mutedText px-2 py-1">
-                                Change Status
+                                Moderation Workflow
                               </p>
-                              <button
-                                type="button"
-                                onClick={() => handleStatusChange(prop.id, 'published')}
-                                className="flex items-center justify-between w-full px-2 py-1.5 text-xs text-charcoal hover:bg-sage/30 rounded-lg"
-                              >
-                                <span>Publish</span>
-                                {prop.publicationStatus === 'published' && <Check className="w-3 h-3 text-forest" />}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleStatusChange(prop.id, 'pending')}
-                                className="flex items-center justify-between w-full px-2 py-1.5 text-xs text-charcoal hover:bg-sage/30 rounded-lg"
-                              >
-                                <span>Submit for Review</span>
-                                {prop.publicationStatus === 'pending' && <Check className="w-3 h-3 text-amber-600" />}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleStatusChange(prop.id, 'draft')}
-                                className="flex items-center justify-between w-full px-2 py-1.5 text-xs text-charcoal hover:bg-sage/30 rounded-lg"
-                              >
-                                <span>Move to Draft</span>
-                                {prop.publicationStatus === 'draft' && <Check className="w-3 h-3 text-slate-600" />}
-                              </button>
+                              {prop.publicationStatus !== 'pending' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleStatusChange(prop.id, 'pending')}
+                                  className="flex items-center justify-between w-full px-2 py-1.5 text-xs text-charcoal hover:bg-amber-50 hover:text-amber-900 rounded-lg transition-colors"
+                                >
+                                  <span>Submit for Review</span>
+                                  <Clock className="w-3.5 h-3.5 text-amber-600" />
+                                </button>
+                              )}
+                              {prop.publicationStatus !== 'draft' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleStatusChange(prop.id, 'draft')}
+                                  className="flex items-center justify-between w-full px-2 py-1.5 text-xs text-charcoal hover:bg-slate-50 hover:text-slate-900 rounded-lg transition-colors"
+                                >
+                                  <span>Move to Draft</span>
+                                  <FileText className="w-3.5 h-3.5 text-slate-500" />
+                                </button>
+                              )}
                               <div className="border-t border-sage/60 my-1" />
                               <button
                                 type="button"
@@ -420,9 +419,9 @@ export default function AgentProperties() {
                                     propertyTitle: prop.title,
                                   });
                                 }}
-                                className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs text-rose-600 hover:bg-rose-50 rounded-lg"
+                                className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
                               >
-                                <Trash2 className="w-3 h-3" />
+                                <Trash2 className="w-3.5 h-3.5" />
                                 <span>Delete Listing</span>
                               </button>
                             </div>
@@ -447,9 +446,12 @@ export default function AgentProperties() {
               >
                 <div className="flex items-start gap-3">
                   <img
-                    src={prop.imageUrls?.[0] || 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=150&q=80'}
+                    src={prop.imageUrls?.[0] || prop.images?.[0] || 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=150&q=80'}
                     alt={prop.title}
                     className="w-20 h-20 rounded-xl object-cover shrink-0 border border-sage/60"
+                    onError={(e) => {
+                      e.currentTarget.src = 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=150&q=80';
+                    }}
                   />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 mb-1 flex-wrap">

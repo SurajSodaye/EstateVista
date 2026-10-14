@@ -117,6 +117,12 @@ export function AgentAuthProvider({ children }) {
       agentProfile.advisorStatus === 'rejected'
   );
 
+  const isSuspendedAdvisor = Boolean(
+    agentUser &&
+      agentProfile &&
+      agentProfile.advisorStatus === 'suspended'
+  );
+
   const value = {
     agentUser,
     agentProfile,
@@ -125,6 +131,7 @@ export function AgentAuthProvider({ children }) {
     isAdvisor,
     isPendingAdvisor,
     isRejectedAdvisor,
+    isSuspendedAdvisor,
     isFirebaseConfigured,
     agentLogin,
     agentLogout,

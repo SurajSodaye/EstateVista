@@ -8,19 +8,13 @@ import {
   ArrowRight,
   Clock,
   CheckCircle2,
-  AlertCircle,
   AlertTriangle,
   RotateCw,
   Shield,
   FileText,
-  Database,
   Lock,
-  ExternalLink,
-  Award,
-  Sparkles,
 } from 'lucide-react';
 import Button from '../../components/common/Button';
-import Badge from '../../components/common/Badge';
 import { useAdminAuth } from '../../context/AdminAuthContext';
 import {
   getFirestoreAdminDashboardStats,
@@ -90,82 +84,130 @@ export default function AdminDashboard() {
             Querying Live Cloud Firestore
           </p>
           <p className="text-xs text-mutedText">
-            Executing server aggregation queries for 'users' and 'advisorApplications'...
+            Executing server aggregation queries for 'users', 'properties', and 'advisorApplications'...
           </p>
         </div>
       </div>
     );
   }
 
-  const hasPermissionError = stats?.error?.type === 'permission_denied';
-  const hasNetworkError = stats?.error?.type === 'network_error';
+  const hasPermissionError = stats?.overallStatus === 'permission_denied' || stats?.error?.type === 'permission_denied';
+  const hasNetworkError = stats?.overallStatus === 'network_error' || stats?.error?.type === 'network_error';
 
   return (
     <div className="space-y-8">
       {/* ======================================================== */}
-      {/* CONNECTION STATUS & REFRESH ACTION HEADER                */}
+      {/* 1. EXECUTIVE PAGE HEADER                                 */}
       {/* ======================================================== */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-white border border-sage/60 shadow-xs">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-forest text-gold flex items-center justify-center shadow-xs shrink-0">
-            <Database className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-serif text-sm font-bold text-charcoal">
-                Cloud Firestore Telemetry
-              </span>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
-                Phase 1 Live Connection
-              </span>
-            </div>
-            <p className="text-[11px] text-mutedText">
-              Queries execute against live Google Cloud Firestore with server-side security rules enforcement.
-            </p>
-          </div>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 className="font-serif text-xl sm:text-2xl font-bold text-charcoal">
+            Operations & Performance Console
+          </h2>
+          <p className="text-xs text-mutedText mt-0.5">
+            Real-time aggregate platform metrics, accreditation queues, and property submissions
+          </p>
         </div>
 
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <div className="flex items-center gap-2">
+          <Link to="/admin/properties">
+            <Button variant="outline" size="sm" icon={Building2} className="text-xs">
+              Manage Listings
+            </Button>
+          </Link>
           <Button
-            variant="outline"
+            variant="primary"
             size="sm"
             icon={RotateCw}
             onClick={handleManualRefresh}
             isLoading={isRefreshing}
-            className="text-xs"
+            className="text-xs shadow-xs"
           >
-            <span>{isRefreshing ? 'Refreshing...' : 'Refresh Firestore Stats'}</span>
+            <span>{isRefreshing ? 'Refreshing...' : 'Refresh Stats'}</span>
           </Button>
         </div>
       </div>
 
       {/* ======================================================== */}
-      {/* ERROR BANNER (Permission Denied or Network Error)        */}
+      {/* ERROR BANNERS (If any)                                   */}
       {/* ======================================================== */}
       {hasPermissionError && (
-        <div className="p-4 rounded-2xl bg-red-50 border border-red-200 text-xs text-red-900 space-y-1.5 animate-in fade-in">
-          <div className="flex items-center gap-2 font-bold text-red-950">
-            <Lock className="w-4 h-4 text-red-600 shrink-0" />
-            <span>Cloud Firestore Read Blocked: Insufficient Security Clearance</span>
+        <div className="p-4 sm:p-5 rounded-3xl bg-red-50/90 border border-red-300 text-red-900 shadow-xs space-y-2 animate-in fade-in">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-red-100 text-red-700 flex items-center justify-center shrink-0">
+                <Lock className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-serif text-sm font-bold text-red-950">
+                    Cloud Firestore Read Blocked: Insufficient Security Clearance
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-200 text-red-900 border border-red-300 uppercase tracking-wider">
+                    Clearance Required
+                  </span>
+                </div>
+                <p className="text-xs text-red-800 mt-0.5">
+                  {stats?.error?.message || 'Administrative clearance is required to query system telemetry. Ensure role: "admin" at /users/{uid}.'}
+                </p>
+              </div>
+            </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              icon={RotateCw}
+              onClick={handleManualRefresh}
+              isLoading={isRefreshing}
+              className="text-xs shrink-0 self-start sm:self-auto"
+            >
+              <span>Retry Connection</span>
+            </Button>
           </div>
-          <p className="text-[11px] leading-relaxed">
-            {stats.error.message}
-          </p>
-          <div className="text-[10px] text-red-800 pt-1 border-t border-red-200/60 font-mono">
-            Active UID: {currentUser?.uid || 'anonymous'} • Profile Role: {userProfile?.role || 'customer'}
+          <div className="text-[10px] text-red-800 pt-1.5 border-t border-red-200 font-mono">
+            Active UID: {currentUser?.uid || 'anonymous'} • Profile Role: {userProfile?.role || 'customer'} • Last Attempt: {new Date().toLocaleTimeString()}
           </div>
         </div>
       )}
 
       {hasNetworkError && (
-        <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-center gap-2 animate-in fade-in">
-          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-          <span>{stats.error.message}</span>
+        <div className="p-4 sm:p-5 rounded-3xl bg-amber-50/90 border border-amber-300 text-amber-900 shadow-xs space-y-2 animate-in fade-in">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-serif text-sm font-bold text-amber-950">
+                    Cloud Firestore Connection Interrupted
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 border border-amber-300 uppercase tracking-wider">
+                    Offline
+                  </span>
+                </div>
+                <p className="text-xs text-amber-800 mt-0.5">
+                  Cloud Firestore backend is unreachable. Displaying cached/last available snapshot.
+                </p>
+              </div>
+            </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              icon={RotateCw}
+              onClick={handleManualRefresh}
+              isLoading={isRefreshing}
+              className="text-xs shrink-0 self-start sm:self-auto"
+            >
+              <span>Reconnect</span>
+            </Button>
+          </div>
         </div>
       )}
 
       {/* ======================================================== */}
-      {/* 1. EXECUTIVE TELEMETRY KPI CARDS                         */}
+      {/* 2. EXECUTIVE TELEMETRY KPI CARDS                         */}
       {/* ======================================================== */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1: Total Users (Live Firestore) */}
@@ -237,7 +279,7 @@ export default function AdminDashboard() {
 
           <p className="mt-3 text-[11px] text-amber-900 flex items-center justify-between pt-2 border-t border-amber-200/60">
             <span>{stats?.applications?.total ?? 0} Total Filed</span>
-            <span className="font-semibold text-amber-800">Live Firestore</span>
+            <span className="font-semibold text-amber-800">{stats?.applications?.approved ?? 0} Approved</span>
           </p>
         </div>
 
@@ -317,7 +359,7 @@ export default function AdminDashboard() {
       </div>
 
       {/* ======================================================== */}
-      {/* 2. GOVERNANCE SHORTCUTS                                  */}
+      {/* 3. GOVERNANCE SHORTCUTS                                  */}
       {/* ======================================================== */}
       <div className="bg-white rounded-2xl p-4 sm:p-5 border border-sage/60 shadow-xs flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -350,7 +392,7 @@ export default function AdminDashboard() {
             </Button>
           </Link>
           <Link to="/admin/settings">
-            <Button variant="ghost" size="sm">
+            <Button variant="ghost" size="sm" icon={FileText}>
               Security Policy
             </Button>
           </Link>
@@ -358,7 +400,7 @@ export default function AdminDashboard() {
       </div>
 
       {/* ======================================================== */}
-      {/* 3. TWO-COLUMN SECTIONS (Pending Queue & Integration Feed)*/}
+      {/* 4. TWO-COLUMN QUEUES (Pending Applications & Properties)  */}
       {/* ======================================================== */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Left Column: Live Advisor Applications Queue */}
@@ -420,8 +462,8 @@ export default function AdminDashboard() {
                       <p className="text-[11px] text-mutedText mt-1">
                         {app.experienceYears || 0} Years Experience • License: <code className="font-mono">{app.licenseNumber || '—'}</code>
                       </p>
-                      <p className="text-[10px] text-mutedText mt-0.5">
-                        Email: {app.applicantEmail}
+                      <p className="text-[10px] text-mutedText mt-0.5 font-mono">
+                        UID: {app.id} • Email: {app.applicantEmail}
                       </p>
                     </div>
                     <Link to="/admin/advisor-applications">
@@ -482,9 +524,13 @@ export default function AdminDashboard() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-start gap-3 min-w-0">
                       <img
-                        src={prop.imageUrls?.[0] || 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=120&q=80'}
+                        src={prop.imageUrls?.[0] || prop.images?.[0] || 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=120&q=80'}
                         alt={prop.title}
                         className="w-12 h-12 rounded-xl object-cover border border-sage shrink-0"
+                        onError={(e) => {
+                          e.currentTarget.onerror = null;
+                          e.currentTarget.src = 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=120&q=80';
+                        }}
                       />
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
@@ -523,7 +569,7 @@ export default function AdminDashboard() {
       </div>
 
       {/* ======================================================== */}
-      {/* 4. CLOUD FIRESTORE TELEMETRY MATRIX                      */}
+      {/* 5. CLOUD FIRESTORE TELEMETRY MATRIX                      */}
       {/* ======================================================== */}
       <div className="bg-white rounded-2xl p-5 sm:p-6 border border-sage/60 shadow-xs space-y-4">
         <div className="flex items-center justify-between">

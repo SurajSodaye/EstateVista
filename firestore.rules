@@ -128,22 +128,26 @@ service cloud.firestore {
       // Properties creation:
       // - Admins can create with any publication status
       // - Approved advisors can create only under their own UID, strictly as unpublished draft or pending approval
+      // - Non-admin advisors cannot set moderationStatus to 'approved'
       allow create: if isAdmin() || (
         isApprovedAdvisor()
         && request.resource.data.createdByUid == request.auth.uid
         && request.resource.data.isPublished == false
         && request.resource.data.publicationStatus in ['draft', 'pending']
+        && (!('moderationStatus' in request.resource.data) || request.resource.data.moderationStatus in ['draft', 'pending'])
       );
 
       // Properties update:
       // - Admins can moderate, approve, publish, reject, or edit any property
       // - Approved advisors can only update their own listings and CANNOT self-publish or bypass admin moderation
+      // - Non-admin advisors cannot self-approve (moderationStatus cannot be set to 'approved')
       allow update: if isAdmin() || (
         isApprovedAdvisor()
         && resource.data.createdByUid == request.auth.uid
         && (!('createdByUid' in request.resource.data) || request.resource.data.createdByUid == resource.data.createdByUid)
         && request.resource.data.isPublished == false
         && request.resource.data.publicationStatus in ['draft', 'pending']
+        && (!('moderationStatus' in request.resource.data) || request.resource.data.moderationStatus in ['draft', 'pending', resource.data.moderationStatus])
       );
 
       // Advisors can delete their own properties; admins can delete any property
@@ -155,8 +159,10 @@ service cloud.firestore {
 
     // 5. Audit Logs collection: /auditLogs/{logId}
     match /auditLogs/{logId} {
-      // Only authenticated administrators can read and record audit logs
-      allow read, write: if isAdmin();
+      // Append-only audit trail: authorized administrators can read and create logs,
+      // but updates and deletes are permanently denied to preserve compliance integrity.
+      allow read, create: if isAdmin();
+      allow update, delete: if false;
     }
   }
 }

@@ -45,7 +45,7 @@ export default function AdminInquiries() {
   };
 
   const handleStatusChange = async (id, newStatus) => {
-    await updateFirestoreInquiryStatus(id, newStatus, adminUser?.email || 'Administrator');
+    await updateFirestoreInquiryStatus(id, newStatus, null, adminUser?.email || 'Administrator');
     setNotification(`Inquiry status updated to: ${newStatus.toUpperCase()}`);
     setSelectedInquiry(null);
     await loadData();

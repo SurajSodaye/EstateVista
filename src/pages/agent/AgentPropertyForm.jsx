@@ -15,12 +15,14 @@ import {
   HelpCircle,
   CheckCircle2,
   Upload,
+  X,
 } from 'lucide-react';
 import Button from '../../components/common/Button';
 import Input from '../../components/common/Input';
 import Select from '../../components/common/Select';
 import NotFoundState from '../../components/common/NotFoundState';
 import LoadingState from '../../components/common/LoadingState';
+import { useAgentAuth } from '../../context/AgentAuthContext';
 import {
   getAgentPropertyById,
   createAgentProperty,
@@ -57,11 +59,13 @@ export default function AgentPropertyForm() {
   const { id } = useParams();
   const isEditMode = Boolean(id);
   const navigate = useNavigate();
+  const { agentUser, agentProfile } = useAgentAuth();
 
   const [loading, setLoading] = useState(isEditMode);
   const [notFound, setNotFound] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [successNotice, setSuccessNotice] = useState(null);
+  const [errorMessage, setErrorMessage] = useState('');
 
   const [uploadingImage, setUploadingImage] = useState(false);
 
@@ -88,6 +92,7 @@ export default function AgentPropertyForm() {
     imageUrls: [],
     isFeatured: false,
     publicationStatus: 'draft',
+    rejectionReason: null,
   });
 
   const [customAmenityInput, setCustomAmenityInput] = useState('');
@@ -99,9 +104,13 @@ export default function AgentPropertyForm() {
     if (!files.length) return;
 
     setUploadingImage(true);
-    setErrors((prev) => ({ ...prev, imageUrls: null }));
+    setErrors((prev) => ({ ...prev, imageUrls: null, storageNotice: null }));
     try {
       for (const file of files) {
+        if (!file.type || !file.type.startsWith('image/')) {
+          setErrors((prev) => ({ ...prev, imageUrls: 'Please select valid image files (JPEG, PNG, WebP).' }));
+          continue;
+        }
         if (file.size > 10 * 1024 * 1024) {
           setErrors((prev) => ({ ...prev, imageUrls: 'Each image must be under 10MB.' }));
           continue;
@@ -114,7 +123,12 @@ export default function AgentPropertyForm() {
       }
     } catch (err) {
       console.error('Image upload failed:', err);
-      setErrors((prev) => ({ ...prev, imageUrls: 'Failed to upload image to Firebase Storage: ' + (err.message || 'Error') }));
+      setErrors((prev) => ({
+        ...prev,
+        imageUrls: err.message || 'Firebase Cloud Storage upload was unsuccessful.',
+        storageNotice:
+          'To enable direct file uploads: open Firebase Console > Build > Storage > Get Started, and apply storage.rules. You can also paste external image URLs below in the meantime.',
+      }));
     } finally {
       setUploadingImage(false);
       e.target.value = '';
@@ -132,7 +146,8 @@ export default function AgentPropertyForm() {
       .then((property) => {
         if (!isMounted) return;
 
-        if (!property) {
+        // Security check: Must exist and belong to current authenticated advisor
+        if (!property || (agentUser?.uid && property.createdByUid && property.createdByUid !== agentUser.uid)) {
           setNotFound(true);
           setLoading(false);
           return;
@@ -155,9 +170,12 @@ export default function AgentPropertyForm() {
           state: property.state || 'Maharashtra',
           postalCode: property.postalCode || '',
           amenities: Array.isArray(property.amenities) ? property.amenities : [],
-          imageUrls: Array.isArray(property.imageUrls) && property.imageUrls.length > 0 ? property.imageUrls : [SAMPLE_DEMO_IMAGES[0]],
+          imageUrls: Array.isArray(property.imageUrls) && property.imageUrls.length > 0
+            ? property.imageUrls
+            : (Array.isArray(property.images) ? property.images : []),
           isFeatured: Boolean(property.isFeatured),
           publicationStatus: property.publicationStatus || 'draft',
+          rejectionReason: property.rejectionReason || null,
         });
         setLoading(false);
       })
@@ -172,7 +190,7 @@ export default function AgentPropertyForm() {
     return () => {
       isMounted = false;
     };
-  }, [id, isEditMode]);
+  }, [id, isEditMode, agentUser?.uid]);
 
   if (loading) {
     return <LoadingState message="Retrieving listing specifications..." />;
@@ -254,6 +272,18 @@ export default function AgentPropertyForm() {
     }));
   };
 
+  const handleSetCoverImage = (indexToCover) => {
+    setFormData((prev) => {
+      if (indexToCover <= 0 || indexToCover >= prev.imageUrls.length) return prev;
+      const targetUrl = prev.imageUrls[indexToCover];
+      const remaining = prev.imageUrls.filter((_, idx) => idx !== indexToCover);
+      return {
+        ...prev,
+        imageUrls: [targetUrl, ...remaining],
+      };
+    });
+  };
+
   // Form Validation
   const validateForm = () => {
     const newErrors = {};
@@ -310,6 +340,7 @@ export default function AgentPropertyForm() {
 
   // Form Submit Handler
   const handleSubmit = async (targetStatus) => {
+    setErrorMessage('');
     if (!validateForm()) {
       // Scroll to top of form to show validation messages
       window.scrollTo({ top: 120, behavior: 'smooth' });
@@ -327,6 +358,10 @@ export default function AgentPropertyForm() {
       bathrooms: Number(formData.bathrooms),
       parkingSlots: Number(formData.parkingSlots),
       publicationStatus: targetStatus,
+      agentName: agentProfile?.name || agentUser?.displayName || 'Advisor',
+      agentEmail: agentUser?.email || '',
+      agentPhone: agentProfile?.phone || '',
+      agency: agentProfile?.agency || '',
     };
 
     try {
@@ -334,7 +369,7 @@ export default function AgentPropertyForm() {
         await updateAgentProperty(id, submissionPayload);
         setSuccessNotice({
           title: 'Listing Updated in Firestore',
-          message: `The changes to "${formData.title}" have been saved to Cloud Firestore (${targetStatus === 'published' ? 'Published' : targetStatus === 'pending' ? 'Submitted for Approval' : 'Draft'}).`,
+          message: `The changes to "${formData.title}" have been saved to Cloud Firestore (${targetStatus === 'pending' ? 'Submitted for Editorial Review' : 'Saved as Draft'}).`,
         });
       } else {
         const created = await createAgentProperty(submissionPayload, targetStatus);
@@ -345,7 +380,8 @@ export default function AgentPropertyForm() {
       }
     } catch (err) {
       console.error('Failed to save listing:', err);
-      alert('Failed to save property listing to Cloud Firestore: ' + (err.message || 'Unknown error'));
+      setErrorMessage(err.message || 'Failed to save property listing to Cloud Firestore. Please verify your connection.');
+      window.scrollTo({ top: 120, behavior: 'smooth' });
     } finally {
       setSubmitting(false);
     }
@@ -404,6 +440,58 @@ export default function AgentPropertyForm() {
         </div>
       </div>
 
+      {/* In-Page Error Notification Banner */}
+      {errorMessage && (
+        <div className="bg-rose-50 border border-rose-300 rounded-2xl p-5 shadow-soft flex items-start justify-between gap-3.5 animate-in fade-in duration-200">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+              <AlertCircle className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-rose-900 text-sm sm:text-base">
+                Failed to Save Property Listing
+              </h3>
+              <p className="text-xs sm:text-sm text-rose-800 mt-0.5 leading-relaxed">
+                {errorMessage}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setErrorMessage('')}
+            className="p-1 rounded-lg text-rose-700 hover:bg-rose-100 transition-colors shrink-0"
+            title="Dismiss notification"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Rejection Feedback Banner for Rejected Properties in Edit Mode */}
+      {isEditMode && formData.publicationStatus === 'rejected' && formData.rejectionReason && (
+        <div className="bg-rose-50 border-2 border-rose-300 rounded-2xl p-5 shadow-soft flex items-start gap-3.5 animate-in fade-in duration-200">
+          <div className="w-10 h-10 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+            <AlertCircle className="w-5 h-5" />
+          </div>
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="font-bold text-rose-900 text-sm sm:text-base">
+                Listing Revisions Requested by Administrator
+              </h3>
+              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-rose-200 text-rose-800">
+                Revision Required
+              </span>
+            </div>
+            <p className="text-xs sm:text-sm text-rose-800 leading-relaxed font-medium">
+              {formData.rejectionReason}
+            </p>
+            <p className="text-[11px] text-rose-700 pt-0.5">
+              Please address the administrator feedback above and click <strong>"Submit for Approval"</strong> to resubmit this listing.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Success Notification Modal */}
       {successNotice && (
         <div className="bg-emerald-50 border border-emerald-300 rounded-2xl p-6 shadow-soft flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-in fade-in duration-200">
@@ -437,6 +525,7 @@ export default function AgentPropertyForm() {
                 size="sm"
                 onClick={() => {
                   setSuccessNotice(null);
+                  setErrorMessage('');
                   setFormData({
                     title: '',
                     description: '',
@@ -454,9 +543,10 @@ export default function AgentPropertyForm() {
                     state: 'Maharashtra',
                     postalCode: '',
                     amenities: ['24/7 Security', 'Covered Parking'],
-                    imageUrls: [SAMPLE_DEMO_IMAGES[0]],
+                    imageUrls: [],
                     isFeatured: false,
                     publicationStatus: 'draft',
+                    rejectionReason: null,
                   });
                 }}
               >
@@ -895,6 +985,15 @@ export default function AgentPropertyForm() {
               </div>
             </div>
 
+            {errors.storageNotice && (
+              <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-900 mb-3 space-y-1">
+                <div className="flex items-center gap-1.5 font-bold">
+                  <AlertCircle className="w-4 h-4 text-amber-700" />
+                  <span>Cloud Storage Activation Notice</span>
+                </div>
+                <p className="leading-relaxed">{errors.storageNotice}</p>
+              </div>
+            )}
             {errors.newImageUrl && (
               <p className="text-xs text-red-600 mb-2">{errors.newImageUrl}</p>
             )}
@@ -917,7 +1016,17 @@ export default function AgentPropertyForm() {
                       e.target.src = 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=400&q=80';
                     }}
                   />
-                  <div className="absolute inset-0 bg-charcoal/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center p-2">
+                  <div className="absolute inset-0 bg-charcoal/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 p-2">
+                    {idx !== 0 && (
+                      <button
+                        type="button"
+                        onClick={() => handleSetCoverImage(idx)}
+                        className="px-2 py-1 rounded-lg bg-gold text-forest hover:bg-gold-light text-[10px] font-bold transition-colors shadow-xs"
+                        title="Set as Cover Photo"
+                      >
+                        Make Cover
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => handleRemoveImage(idx)}
@@ -928,8 +1037,8 @@ export default function AgentPropertyForm() {
                     </button>
                   </div>
                   {idx === 0 && (
-                    <span className="absolute bottom-1.5 left-1.5 text-[9px] font-bold bg-forest text-white px-1.5 py-0.5 rounded shadow">
-                      Cover Photo
+                    <span className="absolute bottom-1.5 left-1.5 text-[9px] font-bold bg-forest text-white px-2 py-0.5 rounded shadow-sm border border-gold/40">
+                      ★ Cover Photo
                     </span>
                   )}
                 </div>
