@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Link, NavLink, useLocation } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { Menu, X, Building2, User, Heart, LogOut, LayoutDashboard } from 'lucide-react';
 import Button from '../common/Button';
 import { useAuth } from '../../context/AuthContext';
@@ -9,6 +9,62 @@ export default function Navbar() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
+
+  // Hidden admin shortcut: 5 clicks within 3 seconds
+  const logoClicksRef = useRef([]);
+  const logoTimerRef = useRef(null);
+  const isRedirectingRef = useRef(false);
+
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (logoTimerRef.current) {
+        clearTimeout(logoTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleLogoClick = (e) => {
+    // If redirect to admin was already triggered, prevent trailing clicks from navigating to home
+    if (isRedirectingRef.current) {
+      e.preventDefault();
+      return;
+    }
+
+    const now = Date.now();
+    // Filter out clicks older than 3 seconds (3000ms sliding window)
+    const recentClicks = logoClicksRef.current.filter((time) => now - time <= 3000);
+    recentClicks.push(now);
+    logoClicksRef.current = recentClicks;
+
+    // Reset timer for window expiration cleanup
+    if (logoTimerRef.current) {
+      clearTimeout(logoTimerRef.current);
+    }
+    logoTimerRef.current = setTimeout(() => {
+      logoClicksRef.current = [];
+      logoTimerRef.current = null;
+    }, 3000);
+
+    // On 5th click within 3 seconds, redirect to /admin/login
+    if (recentClicks.length >= 5) {
+      e.preventDefault();
+      isRedirectingRef.current = true;
+      logoClicksRef.current = [];
+      if (logoTimerRef.current) {
+        clearTimeout(logoTimerRef.current);
+        logoTimerRef.current = null;
+      }
+      setIsMobileMenuOpen(false);
+      navigate('/admin/login');
+
+      // Release lock after 2 seconds
+      setTimeout(() => {
+        isRedirectingRef.current = false;
+      }, 2000);
+    }
+  };
 
   useEffect(() => {
     const handleScroll = () => {
@@ -56,7 +112,7 @@ export default function Navbar() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between">
             {/* Brand Logo */}
-            <Link to="/" className="flex items-center gap-2.5 group">
+            <Link to="/" onClick={handleLogoClick} className="flex items-center gap-2.5 group select-none">
               <div className="w-10 h-10 rounded-xl bg-forest flex items-center justify-center text-gold shadow-sm transition-transform duration-300 group-hover:scale-105">
                 <Building2 className="w-5 h-5" />
               </div>
@@ -169,14 +225,14 @@ export default function Navbar() {
           {/* Drawer Content */}
           <div className="relative bg-ivory rounded-t-3xl border-t border-sage shadow-2xl p-6 z-10 max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-4 border-b border-sage/60 mb-4">
-              <div className="flex items-center gap-2">
+              <Link to="/" onClick={handleLogoClick} className="flex items-center gap-2 select-none">
                 <div className="w-8 h-8 rounded-lg bg-forest flex items-center justify-center text-gold">
                   <Building2 className="w-4 h-4" />
                 </div>
                 <span className="font-serif text-lg font-bold text-forest">
                   EstateVista
                 </span>
-              </div>
+              </Link>
               <button
                 type="button"
                 onClick={() => setIsMobileMenuOpen(false)}
