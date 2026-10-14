@@ -14,10 +14,14 @@ import Agents from '../pages/Agents';
 import AgentDetails from '../pages/AgentDetails';
 import About from '../pages/About';
 import Contact from '../pages/Contact';
+import MyInquiries from '../pages/MyInquiries';
 import Login from '../pages/Login';
 import Register from '../pages/Register';
 import ForgotPassword from '../pages/ForgotPassword';
 import NotFound from '../pages/NotFound';
+
+// Customer Protected Route Guard
+import CustomerRoute from '../components/customer/CustomerRoute';
 
 // Advisor Portal Entry & Application Pages (Public Layout)
 import AdvisorPortalLanding from '../pages/agent/AdvisorPortalLanding';
@@ -156,6 +160,12 @@ export default function AppRouter() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
+
+          {/* Customer Inquiries History Protected Route */}
+          <Route element={<CustomerRoute />}>
+            <Route path="/my-inquiries" element={<MyInquiries />} />
+          </Route>
+
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>

@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { Menu, X, Building2, User, Heart, LogOut, LayoutDashboard } from 'lucide-react';
+import { Menu, X, Building2, User, Heart, LogOut, LayoutDashboard, MessageSquare } from 'lucide-react';
 import Button from '../common/Button';
 import { useAuth } from '../../context/AuthContext';
 
 export default function Navbar() {
-  const { currentUser, userProfile, logout, isAdvisor } = useAuth();
+  const { currentUser, userProfile, logout, isAdvisor, isAdmin } = useAuth();
+  const isCustomerUser = Boolean(currentUser && !isAdvisor && !isAdmin);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const location = useLocation();
@@ -158,6 +159,22 @@ export default function Navbar() {
                   Saved
                 </Button>
               </Link>
+              {isCustomerUser && (
+                <Link to="/my-inquiries">
+                  <Button
+                    variant={location.pathname === '/my-inquiries' ? 'secondary' : 'ghost'}
+                    size="sm"
+                    icon={MessageSquare}
+                    className={`text-xs ${
+                      location.pathname === '/my-inquiries'
+                        ? 'text-forest font-semibold'
+                        : 'text-charcoal/80'
+                    }`}
+                  >
+                    My Inquiries
+                  </Button>
+                </Link>
+              )}
               <div className="h-4 w-px bg-sage"></div>
               {currentUser ? (
                 <div className="flex items-center gap-3">
@@ -282,6 +299,22 @@ export default function Navbar() {
                   Saved Properties
                 </Button>
               </Link>
+              {isCustomerUser && (
+                <Link
+                  to="/my-inquiries"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="w-full block"
+                >
+                  <Button
+                    variant={location.pathname === '/my-inquiries' ? 'secondary' : 'ghost'}
+                    size="md"
+                    icon={MessageSquare}
+                    className="w-full text-charcoal border border-sage/60"
+                  >
+                    My Inquiries
+                  </Button>
+                </Link>
+              )}
               {currentUser ? (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 p-3 rounded-xl bg-sage-light text-forest border border-sage/60">

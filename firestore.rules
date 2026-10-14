@@ -104,20 +104,36 @@ service cloud.firestore {
 
     // 3. Inquiries collection: /inquiries/{inquiryId}
     match /inquiries/{inquiryId} {
-      // Anyone can submit a property or concierge inquiry with valid contact email and message
-      allow create: if ((('senderEmail' in request.resource.data && request.resource.data.senderEmail != null) ||
-                         ('clientEmail' in request.resource.data && request.resource.data.clientEmail != null)))
-                    && request.resource.data.message != null;
+      // Inquiry creation:
+      // - Must have valid client email and message
+      // - Anti-impersonation: if customerUid is specified, caller must be authenticated and own that UID
+      allow create: if (
+        (('senderEmail' in request.resource.data && request.resource.data.senderEmail != null) ||
+         ('clientEmail' in request.resource.data && request.resource.data.clientEmail != null))
+        && request.resource.data.message != null
+        && (
+          !('customerUid' in request.resource.data)
+          || request.resource.data.customerUid == ''
+          || request.resource.data.customerUid == null
+          || (isAuthenticated() && request.resource.data.customerUid == request.auth.uid)
+        )
+      );
 
-      // Approved advisors can read inquiries directed to them; admins can read all
-      allow read: if isApprovedAdvisor() && (
-        resource.data.advisorUid == request.auth.uid || isAdmin()
+      // Read access:
+      // - Authenticated customers can read inquiries where customerUid matches their UID
+      // - Approved advisors can read inquiries assigned to their advisorUid
+      // - Administrators can read all inquiries
+      allow read: if (
+        (isAuthenticated() && ('customerUid' in resource.data) && resource.data.customerUid != '' && resource.data.customerUid == request.auth.uid)
+        || (isApprovedAdvisor() && resource.data.advisorUid == request.auth.uid)
+        || isAdmin()
       );
 
       // Updates:
       // - Admins can update any field (status, assignment, notes)
       // - Approved advisors can update only their own inquiries,
       //   and CANNOT reassign advisorUid, alter assignedAgentName, or alter adminNotes
+      // - Customers CANNOT update inquiries
       allow update: if isAdmin() || (
         isApprovedAdvisor()
         && resource.data.advisorUid == request.auth.uid

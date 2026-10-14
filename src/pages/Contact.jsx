@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   MapPin,
   Phone,
@@ -15,8 +15,10 @@ import Button from '../components/common/Button';
 import Input from '../components/common/Input';
 import { validateContactForm } from '../utils/validation';
 import { db, isFirebaseConfigured } from '../lib/firebase';
+import { useAuth } from '../context/AuthContext';
 
 export default function Contact() {
+  const { currentUser, userProfile } = useAuth();
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -31,6 +33,18 @@ export default function Contact() {
   const [submitError, setSubmitError] = useState('');
   const [submittedSubject, setSubmittedSubject] = useState('');
   const [openFaq, setOpenFaq] = useState(null);
+
+  // Auto-populate client credentials if signed in
+  useEffect(() => {
+    if (currentUser) {
+      setFormData((prev) => ({
+        ...prev,
+        name: prev.name || userProfile?.name || currentUser.displayName || '',
+        email: prev.email || currentUser.email || '',
+        phone: prev.phone || userProfile?.phone || '',
+      }));
+    }
+  }, [currentUser, userProfile]);
 
   const faqs = [
     {
@@ -75,6 +89,7 @@ export default function Contact() {
       const nowIso = new Date().toISOString();
       const currentSubject = formData.subject.trim();
       const payload = {
+        customerUid: currentUser?.uid || '',
         clientName: formData.name.trim(),
         name: formData.name.trim(),
         clientEmail: formData.email.trim(),
@@ -106,9 +121,9 @@ export default function Contact() {
       setSubmittedSubject(currentSubject);
       setIsSubmitted(true);
       setFormData({
-        name: '',
-        email: '',
-        phone: '',
+        name: currentUser ? (userProfile?.name || currentUser.displayName || '') : '',
+        email: currentUser ? (currentUser.email || '') : '',
+        phone: currentUser ? (userProfile?.phone || '') : '',
         subject: '',
         message: '',
       });

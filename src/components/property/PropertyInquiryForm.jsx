@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Send, CheckCircle2, User, Mail, Phone, MessageSquare, AlertCircle } from 'lucide-react';
 import { collection, addDoc } from 'firebase/firestore';
 import Button from '../common/Button';
 import Input from '../common/Input';
 import { validateInquiryForm } from '../../utils/validation';
 import { db, isFirebaseConfigured } from '../../lib/firebase';
+import { useAuth } from '../../context/AuthContext';
 
 function isLikelyFirebaseUid(uid) {
   if (!uid || typeof uid !== 'string') return false;
@@ -19,6 +20,7 @@ export default function PropertyInquiryForm({
   propertyId,
   advisorUid,
 }) {
+  const { currentUser, userProfile } = useAuth();
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -30,6 +32,18 @@ export default function PropertyInquiryForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState('');
+
+  // Auto-populate customer credentials if authenticated
+  useEffect(() => {
+    if (currentUser) {
+      setFormData((prev) => ({
+        ...prev,
+        name: prev.name || userProfile?.name || currentUser.displayName || '',
+        email: prev.email || currentUser.email || '',
+        phone: prev.phone || userProfile?.phone || '',
+      }));
+    }
+  }, [currentUser, userProfile]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -58,6 +72,7 @@ export default function PropertyInquiryForm({
       const nowIso = new Date().toISOString();
 
       const payload = {
+        customerUid: currentUser?.uid || '',
         advisorUid: effectiveAdvisorUid,
         assignedAgentName: effectiveAdvisorName,
         propertyId: propertyId ? String(propertyId) : '',
@@ -99,9 +114,9 @@ export default function PropertyInquiryForm({
     setIsSubmitted(false);
     setSubmitError('');
     setFormData({
-      name: '',
-      email: '',
-      phone: '',
+      name: currentUser ? (userProfile?.name || currentUser.displayName || '') : '',
+      email: currentUser ? (currentUser.email || '') : '',
+      phone: currentUser ? (userProfile?.phone || '') : '',
       message: `Hello, I am interested in exploring ${propertyTitle}. Please share further architectural floorplans.`,
     });
   };
