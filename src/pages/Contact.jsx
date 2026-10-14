@@ -10,9 +10,11 @@ import {
   HelpCircle,
   ChevronDown
 } from 'lucide-react';
+import { collection, addDoc } from 'firebase/firestore';
 import Button from '../components/common/Button';
 import Input from '../components/common/Input';
 import { validateContactForm } from '../utils/validation';
+import { db, isFirebaseConfigured } from '../lib/firebase';
 
 export default function Contact() {
   const [formData, setFormData] = useState({
@@ -26,6 +28,8 @@ export default function Contact() {
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  const [submittedSubject, setSubmittedSubject] = useState('');
   const [openFaq, setOpenFaq] = useState(null);
 
   const faqs = [
@@ -55,8 +59,9 @@ export default function Contact() {
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    setSubmitError('');
     const validation = validateContactForm(formData);
 
     if (!validation.isValid) {
@@ -66,10 +71,54 @@ export default function Contact() {
 
     setIsSubmitting(true);
 
-    setTimeout(() => {
-      setIsSubmitting(false);
+    try {
+      const nowIso = new Date().toISOString();
+      const currentSubject = formData.subject.trim();
+      const payload = {
+        clientName: formData.name.trim(),
+        name: formData.name.trim(),
+        clientEmail: formData.email.trim(),
+        senderEmail: formData.email.trim(),
+        clientPhone: formData.phone.trim(),
+        phone: formData.phone.trim(),
+        subject: currentSubject,
+        message: formData.message.trim(),
+        propertyId: null,
+        propertyTitle: 'General Concierge Inquiry',
+        advisorUid: '',
+        assignedAgentName: '',
+        status: 'new',
+        agentNotes: '',
+        adminNotes: '',
+        isRead: false,
+        createdAt: nowIso,
+        date: nowIso,
+        updatedAt: nowIso,
+        source: 'contact_form',
+      };
+
+      if (!isFirebaseConfigured || !db) {
+        throw new Error('Database service is not configured. Please contact our concierge directly.');
+      }
+
+      await addDoc(collection(db, 'inquiries'), payload);
+
+      setSubmittedSubject(currentSubject);
       setIsSubmitted(true);
-    }, 600);
+      setFormData({
+        name: '',
+        email: '',
+        phone: '',
+        subject: '',
+        message: '',
+      });
+      setErrors({});
+    } catch (err) {
+      console.error('Failed to submit contact inquiry:', err);
+      setSubmitError(err.message || 'Unable to submit your inquiry at this time. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const toggleFaq = (index) => {
@@ -169,18 +218,18 @@ export default function Contact() {
                 <CheckCircle2 className="w-8 h-8" />
               </div>
               <h3 className="font-serif text-2xl font-bold text-forest">
-                Demonstration Message Staged!
+                Inquiry Successfully Transmitted
               </h3>
               <p className="text-sm text-charcoal/80 max-w-md mx-auto">
-                Thank you, <strong>{formData.name}</strong>. Your message titled <em>"{formData.subject}"</em> passed all frontend validation requirements.
+                Thank you. Your message titled <em>"{submittedSubject || 'General Concierge Inquiry'}"</em> has been securely transmitted and logged in our concierge inquiry system.
               </p>
               <div className="bg-white rounded-xl p-4 text-xs text-mutedText max-w-lg mx-auto text-left border border-sage space-y-1">
                 <div className="flex items-center gap-1.5 font-bold text-forest">
-                  <AlertCircle className="w-4 h-4 text-gold shrink-0" />
-                  <span>Phase 1 Verification Notice</span>
+                  <CheckCircle2 className="w-4 h-4 text-gold shrink-0" />
+                  <span>Logged to EstateVista Concierge</span>
                 </div>
                 <p>
-                  No external email dispatch was triggered. The payload is validated and structured for future Cloud Firestore integration.
+                  Our accredited luxury property advisors review new inquiries within 24 business hours. A confirmation has been recorded in our directory.
                 </p>
               </div>
               <Button
@@ -188,6 +237,7 @@ export default function Contact() {
                 size="md"
                 onClick={() => {
                   setIsSubmitted(false);
+                  setSubmittedSubject('');
                   setFormData({ name: '', email: '', phone: '', subject: '', message: '' });
                 }}
               >
@@ -196,6 +246,15 @@ export default function Contact() {
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-5">
+              {submitError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-xs sm:text-sm flex items-start gap-2.5">
+                  <AlertCircle className="w-5 h-5 shrink-0 text-red-500 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="font-semibold">Transmission Failed</p>
+                    <p>{submitError}</p>
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                 <Input
                   id="contact-name"
@@ -268,6 +327,7 @@ export default function Contact() {
                 variant="primary"
                 size="lg"
                 isLoading={isSubmitting}
+                disabled={isSubmitting}
                 icon={Send}
                 className="w-full sm:w-auto"
               >

@@ -2347,6 +2347,49 @@ export async function rejectFirestoreUserOrAgent(uid, { rejectionType = 'user', 
 // ========================================================
 
 /**
+/**
+ * Fetch all approved advisors available for inquiry assignment
+ * @returns {Promise<Array>} List of approved advisors
+ */
+export async function getFirestoreApprovedAdvisors() {
+  if (!isFirebaseConfigured || !db || !auth?.currentUser) {
+    return [];
+  }
+
+  try {
+    const usersColl = collection(db, 'users');
+    const snapshot = await getDocs(usersColl);
+    const advisors = [];
+
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      const isApproved =
+        (data.role === 'agent' || data.advisorStatus === 'approved') &&
+        data.accountStatus !== 'suspended' &&
+        data.accountStatus !== 'rejected' &&
+        data.status !== 'suspended' &&
+        data.status !== 'rejected';
+
+      if (isApproved) {
+        advisors.push({
+          uid: data.uid || docSnap.id,
+          name: data.name || data.displayName || 'Advisor',
+          email: data.email || '',
+          agency: data.agency || data.company || 'Independent Advisor',
+          phone: data.phone || '',
+        });
+      }
+    });
+
+    advisors.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    return advisors;
+  } catch (err) {
+    console.error('[AdminFirestoreService] Failed to load approved advisors:', err);
+    return [];
+  }
+}
+
+/**
  * Fetch all client inquiries from Cloud Firestore
  * @param {Object} options { search, status }
  * @returns {Promise<Array>}
@@ -2373,13 +2416,18 @@ export async function getFirestoreAdminInquiries({ search = '', status = 'all' }
         clientEmail: data.clientEmail || data.senderEmail || data.email || 'N/A',
         senderEmail: data.clientEmail || data.senderEmail || data.email || 'N/A',
         clientPhone: data.clientPhone || data.phone || '',
-        propertyTitle: data.propertyTitle || 'Luxury Representation',
-        propertyId: data.propertyId || '',
+        propertyTitle: data.propertyTitle || (data.subject ? `Subject: ${data.subject}` : 'General Concierge Inquiry'),
+        propertyId: data.propertyId || null,
+        subject: data.subject || '',
         advisorUid: data.advisorUid || '',
+        assignedAgentName: data.assignedAgentName || '',
         message: data.message || '',
         agentNotes: data.agentNotes || data.notes || '',
+        adminNotes: data.adminNotes || '',
+        source: data.source || (data.propertyId ? 'property_inquiry' : 'contact_form'),
         date: data.createdAt || data.date || new Date().toISOString(),
         createdAt: data.createdAt || data.date || new Date().toISOString(),
+        updatedAt: data.updatedAt || null,
       });
     });
 
@@ -2392,10 +2440,11 @@ export async function getFirestoreAdminInquiries({ search = '', status = 'all' }
       const q = search.trim().toLowerCase();
       inquiries = inquiries.filter(
         (i) =>
-          i.clientName.toLowerCase().includes(q) ||
-          i.clientEmail.toLowerCase().includes(q) ||
-          i.propertyTitle.toLowerCase().includes(q) ||
-          i.message.toLowerCase().includes(q)
+          (i.clientName || '').toLowerCase().includes(q) ||
+          (i.clientEmail || '').toLowerCase().includes(q) ||
+          (i.propertyTitle || '').toLowerCase().includes(q) ||
+          (i.message || '').toLowerCase().includes(q) ||
+          (i.assignedAgentName || '').toLowerCase().includes(q)
       );
     }
 
@@ -2437,13 +2486,18 @@ export function subscribeFirestoreAdminInquiries(callback, { search = '', status
           clientEmail: data.clientEmail || data.senderEmail || data.email || 'N/A',
           senderEmail: data.clientEmail || data.senderEmail || data.email || 'N/A',
           clientPhone: data.clientPhone || data.phone || '',
-          propertyTitle: data.propertyTitle || 'Luxury Representation',
-          propertyId: data.propertyId || '',
+          propertyTitle: data.propertyTitle || (data.subject ? `Subject: ${data.subject}` : 'General Concierge Inquiry'),
+          propertyId: data.propertyId || null,
+          subject: data.subject || '',
           advisorUid: data.advisorUid || '',
+          assignedAgentName: data.assignedAgentName || '',
           message: data.message || '',
           agentNotes: data.agentNotes || data.notes || '',
+          adminNotes: data.adminNotes || '',
+          source: data.source || (data.propertyId ? 'property_inquiry' : 'contact_form'),
           date: data.createdAt || data.date || new Date().toISOString(),
           createdAt: data.createdAt || data.date || new Date().toISOString(),
+          updatedAt: data.updatedAt || null,
         });
       });
 
@@ -2456,10 +2510,11 @@ export function subscribeFirestoreAdminInquiries(callback, { search = '', status
         const q = search.trim().toLowerCase();
         inquiries = inquiries.filter(
           (i) =>
-            i.clientName.toLowerCase().includes(q) ||
-            i.clientEmail.toLowerCase().includes(q) ||
-            i.propertyTitle.toLowerCase().includes(q) ||
-            i.message.toLowerCase().includes(q)
+            (i.clientName || '').toLowerCase().includes(q) ||
+            (i.clientEmail || '').toLowerCase().includes(q) ||
+            (i.propertyTitle || '').toLowerCase().includes(q) ||
+            (i.message || '').toLowerCase().includes(q) ||
+            (i.assignedAgentName || '').toLowerCase().includes(q)
         );
       }
 
@@ -2474,14 +2529,13 @@ export function subscribeFirestoreAdminInquiries(callback, { search = '', status
 }
 
 /**
- * Update an inquiry's status and notes in Cloud Firestore
+ * Update an inquiry's status in Cloud Firestore (Preserves advisor and admin notes)
  * @param {string} id Inquiry document ID
- * @param {string} newStatus ('new' | 'contacted' | 'closed' | 'resolved')
- * @param {string|null} [notes=null] Optional notes to set. If null or undefined, existing notes are preserved.
+ * @param {string} newStatus ('new' | 'contacted' | 'closed')
  * @param {string} [adminEmail=''] Reviewer/administrator email
  * @returns {Promise<boolean>}
  */
-export async function updateFirestoreInquiryStatus(id, newStatus, notes = null, adminEmail = '') {
+export async function updateFirestoreInquiryStatus(id, newStatus, adminEmail = '') {
   if (!isFirebaseConfigured || !db || !id) return false;
 
   const target = newStatus === 'resolved' ? 'closed' : newStatus;
@@ -2491,11 +2545,6 @@ export async function updateFirestoreInquiryStatus(id, newStatus, notes = null, 
     updatedAt: new Date().toISOString(),
   };
 
-  // Only update agentNotes if notes argument is explicitly provided as a string
-  if (typeof notes === 'string' && notes.trim() !== '') {
-    payload.agentNotes = notes.trim();
-  }
-
   await updateDoc(inqRef, payload);
 
   const actor = adminEmail || auth?.currentUser?.email || 'Administrator';
@@ -2503,6 +2552,69 @@ export async function updateFirestoreInquiryStatus(id, newStatus, notes = null, 
     action: 'INQUIRY_STATUS_UPDATED',
     target: `Inquiry ID: ${id}`,
     details: `Status set to ${target}`,
+    actorEmail: actor,
+  });
+
+  return true;
+}
+
+/**
+ * Update administrative follow-up notes on an inquiry (Preserves agent notes and status)
+ * @param {string} id Inquiry document ID
+ * @param {string} adminNotes Internal notes from administrator
+ * @param {string} [adminEmail='']
+ * @returns {Promise<boolean>}
+ */
+export async function updateFirestoreInquiryAdminNotes(id, adminNotes = '', adminEmail = '') {
+  if (!isFirebaseConfigured || !db || !id) return false;
+
+  const inqRef = doc(db, 'inquiries', id);
+  const payload = {
+    adminNotes: (adminNotes || '').trim(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  await updateDoc(inqRef, payload);
+
+  const actor = adminEmail || auth?.currentUser?.email || 'Administrator';
+  await logFirestoreAdminAction({
+    action: 'INQUIRY_ADMIN_NOTES_UPDATED',
+    target: `Inquiry ID: ${id}`,
+    details: 'Updated administrative follow-up notes',
+    actorEmail: actor,
+  });
+
+  return true;
+}
+
+/**
+ * Assign or reassign an inquiry to an approved advisor
+ * @param {string} id Inquiry document ID
+ * @param {string} advisorUid Selected advisor's UID (or empty string to unassign)
+ * @param {string} [advisorName=''] Advisor display name
+ * @param {string} [adminEmail='']
+ * @returns {Promise<boolean>}
+ */
+export async function assignFirestoreInquiryAdvisor(id, advisorUid = '', advisorName = '', adminEmail = '') {
+  if (!isFirebaseConfigured || !db || !id) return false;
+
+  const inqRef = doc(db, 'inquiries', id);
+  const nowIso = new Date().toISOString();
+  const payload = {
+    advisorUid: advisorUid || '',
+    assignedAgentName: advisorName || '',
+    updatedAt: nowIso,
+  };
+
+  await updateDoc(inqRef, payload);
+
+  const actor = adminEmail || auth?.currentUser?.email || 'Administrator';
+  await logFirestoreAdminAction({
+    action: advisorUid ? 'INQUIRY_ASSIGNED' : 'INQUIRY_UNASSIGNED',
+    target: `Inquiry ID: ${id}`,
+    details: advisorUid
+      ? `Assigned to advisor: ${advisorName || 'Advisor'} (${advisorUid})`
+      : 'Unassigned inquiry from advisor',
     actorEmail: actor,
   });
 

@@ -24,6 +24,7 @@ import {
   getAgentInquiries,
   subscribeAgentInquiries,
   updateInquiryStatus,
+  updateInquiryNotes,
   markInquiryReadStatus,
 } from '../../services/agentPortalService';
 
@@ -64,7 +65,8 @@ export default function AgentInquiries() {
   };
 
   const handleStatusChange = async (inquiryId, newStatus) => {
-    await updateInquiryStatus(inquiryId, newStatus, editingNotes);
+    // Only updates status and isRead; never touches agentNotes
+    await updateInquiryStatus(inquiryId, newStatus);
     if (selectedInquiry && selectedInquiry.id === inquiryId) {
       setSelectedInquiry((prev) => ({
         ...prev,
@@ -89,7 +91,7 @@ export default function AgentInquiries() {
   const handleSaveNotes = async () => {
     if (!selectedInquiry) return;
     setIsSavingNotes(true);
-    await updateInquiryStatus(selectedInquiry.id, selectedInquiry.status, editingNotes);
+    await updateInquiryNotes(selectedInquiry.id, editingNotes);
     setIsSavingNotes(false);
     setSelectedInquiry((prev) => ({ ...prev, agentNotes: editingNotes }));
   };

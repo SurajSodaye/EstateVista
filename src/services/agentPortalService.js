@@ -697,13 +697,12 @@ export async function getInquiryById(id) {
 }
 
 /**
- * Update client inquiry status and agent editorial notes
+ * Update client inquiry status (Preserves existing notes)
  * @param {string} id
  * @param {string} newStatus ('new' | 'contacted' | 'closed')
- * @param {string} notes
  * @returns {Promise<Object>}
  */
-export async function updateInquiryStatus(id, newStatus, notes = '') {
+export async function updateInquiryStatus(id, newStatus) {
   if (!isFirebaseConfigured || !agentDb || !id) {
     throw new Error('Firebase configuration or inquiry ID missing.');
   }
@@ -715,9 +714,6 @@ export async function updateInquiryStatus(id, newStatus, notes = '') {
     isRead: newStatus !== 'new',
     updatedAt: nowIso,
   };
-  if (notes !== undefined) {
-    updatePayload.agentNotes = notes;
-  }
 
   await updateDoc(docRef, updatePayload);
   const snap = await getDoc(docRef);
@@ -726,6 +722,37 @@ export async function updateInquiryStatus(id, newStatus, notes = '') {
     id: snap.id,
     ...d,
     isRead: updatePayload.isRead,
+    date: d.createdAt || d.date || nowIso,
+    clientName: d.clientName || d.name || 'Client',
+    clientEmail: d.clientEmail || d.senderEmail || 'N/A',
+    clientPhone: d.clientPhone || d.phone || '',
+  };
+}
+
+/**
+ * Update client inquiry advisor notes specifically (Preserves status)
+ * @param {string} id
+ * @param {string} notes
+ * @returns {Promise<Object>}
+ */
+export async function updateInquiryNotes(id, notes = '') {
+  if (!isFirebaseConfigured || !agentDb || !id) {
+    throw new Error('Firebase configuration or inquiry ID missing.');
+  }
+
+  const docRef = doc(agentDb, 'inquiries', id);
+  const nowIso = new Date().toISOString();
+  const updatePayload = {
+    agentNotes: typeof notes === 'string' ? notes : '',
+    updatedAt: nowIso,
+  };
+
+  await updateDoc(docRef, updatePayload);
+  const snap = await getDoc(docRef);
+  const d = snap.data();
+  return {
+    id: snap.id,
+    ...d,
     date: d.createdAt || d.date || nowIso,
     clientName: d.clientName || d.name || 'Client',
     clientEmail: d.clientEmail || d.senderEmail || 'N/A',

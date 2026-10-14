@@ -104,18 +104,29 @@ service cloud.firestore {
 
     // 3. Inquiries collection: /inquiries/{inquiryId}
     match /inquiries/{inquiryId} {
-      // Anyone can submit a property inquiry with valid contact email and message
+      // Anyone can submit a property or concierge inquiry with valid contact email and message
       allow create: if ((('senderEmail' in request.resource.data && request.resource.data.senderEmail != null) ||
                          ('clientEmail' in request.resource.data && request.resource.data.clientEmail != null)))
                     && request.resource.data.message != null;
+
       // Approved advisors can read inquiries directed to them; admins can read all
       allow read: if isApprovedAdvisor() && (
         resource.data.advisorUid == request.auth.uid || isAdmin()
       );
-      // Approved advisors can update inquiry status/notes for their own listings; admins can update all
-      allow update: if isApprovedAdvisor() && (
-        resource.data.advisorUid == request.auth.uid || isAdmin()
+
+      // Updates:
+      // - Admins can update any field (status, assignment, notes)
+      // - Approved advisors can update only their own inquiries,
+      //   and CANNOT reassign advisorUid, alter assignedAgentName, or alter adminNotes
+      allow update: if isAdmin() || (
+        isApprovedAdvisor()
+        && resource.data.advisorUid == request.auth.uid
+        && (!('advisorUid' in request.resource.data) || request.resource.data.advisorUid == resource.data.advisorUid)
+        && (!('assignedAgentName' in request.resource.data) || request.resource.data.assignedAgentName == resource.data.assignedAgentName)
+        && (!('adminNotes' in request.resource.data) || request.resource.data.adminNotes == resource.data.adminNotes)
+        && (!('status' in request.resource.data) || request.resource.data.status in ['new', 'contacted', 'closed', 'resolved'])
       );
+
       // Only admins can permanently delete inquiries
       allow delete: if isAdmin();
     }

@@ -6,6 +6,13 @@ import Input from '../common/Input';
 import { validateInquiryForm } from '../../utils/validation';
 import { db, isFirebaseConfigured } from '../../lib/firebase';
 
+function isLikelyFirebaseUid(uid) {
+  if (!uid || typeof uid !== 'string') return false;
+  const trimmed = uid.trim();
+  if (/^(agent-\d+|demo|mock|advisor$)/i.test(trimmed)) return false;
+  return trimmed.length >= 20 && !trimmed.includes(' ');
+}
+
 export default function PropertyInquiryForm({
   propertyTitle = 'this property',
   agentName = 'the property advisor',
@@ -45,10 +52,17 @@ export default function PropertyInquiryForm({
     setSubmitError('');
 
     try {
+      const isRealUid = isLikelyFirebaseUid(advisorUid);
+      const effectiveAdvisorUid = isRealUid ? advisorUid.trim() : '';
+      const effectiveAdvisorName = isRealUid ? (agentName || '') : '';
+      const nowIso = new Date().toISOString();
+
       const payload = {
-        advisorUid: advisorUid || '',
-        propertyId: propertyId || '',
-        propertyTitle: propertyTitle || '',
+        advisorUid: effectiveAdvisorUid,
+        assignedAgentName: effectiveAdvisorName,
+        propertyId: propertyId ? String(propertyId) : '',
+        propertyTitle: propertyTitle || 'Exclusive Property Listing',
+        subject: propertyTitle ? `Inquiry: ${propertyTitle}` : 'Property Inquiry',
         clientName: formData.name.trim(),
         name: formData.name.trim(),
         clientEmail: formData.email.trim(),
@@ -57,19 +71,25 @@ export default function PropertyInquiryForm({
         phone: formData.phone.trim(),
         message: formData.message.trim(),
         status: 'new',
-        createdAt: new Date().toISOString(),
-        date: new Date().toISOString(),
         agentNotes: '',
+        adminNotes: '',
+        isRead: false,
+        source: 'property_inquiry',
+        createdAt: nowIso,
+        date: nowIso,
+        updatedAt: nowIso,
       };
 
-      if (isFirebaseConfigured && db) {
-        await addDoc(collection(db, 'inquiries'), payload);
+      if (!isFirebaseConfigured || !db) {
+        throw new Error('Database connection is not configured. Please contact our concierge directly.');
       }
+
+      await addDoc(collection(db, 'inquiries'), payload);
 
       setIsSubmitted(true);
     } catch (err) {
       console.error('Failed to submit property inquiry:', err);
-      setSubmitError('Unable to transmit inquiry. Please verify your connection and try again.');
+      setSubmitError(err.message || 'Unable to transmit inquiry. Please verify your connection and try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -193,6 +213,7 @@ export default function PropertyInquiryForm({
           variant="primary"
           size="md"
           isLoading={isSubmitting}
+          disabled={isSubmitting}
           icon={Send}
           className="w-full"
         >
