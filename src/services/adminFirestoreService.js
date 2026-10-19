@@ -2569,9 +2569,11 @@ export async function updateFirestoreInquiryAdminNotes(id, adminNotes = '', admi
   if (!isFirebaseConfigured || !db || !id) return false;
 
   const inqRef = doc(db, 'inquiries', id);
+  const nowIso = new Date().toISOString();
   const payload = {
     adminNotes: (adminNotes || '').trim(),
-    updatedAt: new Date().toISOString(),
+    adminNotesUpdatedAt: nowIso,
+    updatedAt: nowIso,
   };
 
   await updateDoc(inqRef, payload);
@@ -2581,6 +2583,47 @@ export async function updateFirestoreInquiryAdminNotes(id, adminNotes = '', admi
     action: 'INQUIRY_ADMIN_NOTES_UPDATED',
     target: `Inquiry ID: ${id}`,
     details: 'Updated administrative follow-up notes',
+    actorEmail: actor,
+  });
+
+  return true;
+}
+
+/**
+ * Update customer-visible note and resolution update on an inquiry.
+ * This is the update visible to the customer on their private My Inquiries portal.
+ * Internal admin notes and advisor notes are completely preserved.
+ *
+ * @param {string} id Inquiry document ID
+ * @param {string} customerVisibleNote Message intended for the client
+ * @param {string} [adminEmail=''] Reviewing administrator email
+ * @param {string} [optionalStatus=''] Optional status change ('contacted' | 'closed')
+ * @returns {Promise<boolean>}
+ */
+export async function updateFirestoreInquiryCustomerNote(id, customerVisibleNote = '', adminEmail = '', optionalStatus = '') {
+  if (!isFirebaseConfigured || !db || !id) return false;
+
+  const inqRef = doc(db, 'inquiries', id);
+  const nowIso = new Date().toISOString();
+  const payload = {
+    customerVisibleNote: (customerVisibleNote || '').trim(),
+    customerVisibleNoteUpdatedAt: nowIso,
+    customerVisibleNoteUpdatedByRole: 'admin',
+    customerVisibleNoteUpdatedByName: 'EstateVista Concierge Desk',
+    updatedAt: nowIso,
+  };
+
+  if (optionalStatus && ['new', 'contacted', 'closed', 'resolved'].includes(optionalStatus)) {
+    payload.status = optionalStatus === 'resolved' ? 'closed' : optionalStatus;
+  }
+
+  await updateDoc(inqRef, payload);
+
+  const actor = adminEmail || auth?.currentUser?.email || 'Administrator';
+  await logFirestoreAdminAction({
+    action: 'INQUIRY_CUSTOMER_NOTE_UPDATED',
+    target: `Inquiry ID: ${id}`,
+    details: `Updated customer-visible note${optionalStatus ? ` with status '${payload.status}'` : ''}`,
     actorEmail: actor,
   });
 

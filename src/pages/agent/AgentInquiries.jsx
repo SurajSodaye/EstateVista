@@ -224,8 +224,8 @@ export default function AgentInquiries() {
                 </p>
 
                 {inq.agentNotes && (
-                  <p className="text-[11px] text-mutedText bg-sage-light/60 px-2 py-0.5 rounded inline-block">
-                    Advisor note: {inq.agentNotes}
+                  <p className="text-[11px] text-mutedText bg-sage-light/60 px-2 py-0.5 rounded inline-block mt-1">
+                    Advisor note: {inq.agentNotes.slice(0, 50)}{inq.agentNotes.length > 50 ? '...' : ''}
                   </p>
                 )}
               </div>

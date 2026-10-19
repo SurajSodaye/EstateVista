@@ -744,8 +744,54 @@ export async function updateInquiryNotes(id, notes = '') {
   const nowIso = new Date().toISOString();
   const updatePayload = {
     agentNotes: typeof notes === 'string' ? notes : '',
+    agentNotesUpdatedAt: nowIso,
     updatedAt: nowIso,
   };
+
+  await updateDoc(docRef, updatePayload);
+  const snap = await getDoc(docRef);
+  const d = snap.data();
+  return {
+    id: snap.id,
+    ...d,
+    date: d.createdAt || d.date || nowIso,
+    clientName: d.clientName || d.name || 'Client',
+    clientEmail: d.clientEmail || d.senderEmail || 'N/A',
+    clientPhone: d.clientPhone || d.phone || '',
+  };
+}
+
+/**
+ * Update customer-visible note on an inquiry by the assigned advisor.
+ * This is the update visible to the customer on their private My Inquiries portal.
+ * Internal advisor notes and status are preserved unless optionalStatus is provided.
+ *
+ * @param {string} id Inquiry document ID
+ * @param {string} customerVisibleNote Note intended for customer
+ * @param {string} [optionalStatus=''] Optional status update ('contacted' | 'closed')
+ * @returns {Promise<Object>}
+ */
+export async function updateCustomerVisibleNote(id, customerVisibleNote = '', optionalStatus = '') {
+  if (!isFirebaseConfigured || !agentDb || !id) {
+    throw new Error('Firebase configuration or inquiry ID missing.');
+  }
+
+  const docRef = doc(agentDb, 'inquiries', id);
+  const nowIso = new Date().toISOString();
+  const currentAdvisorName = agentAuth?.currentUser?.displayName || 'Designated Property Advisor';
+
+  const updatePayload = {
+    customerVisibleNote: (customerVisibleNote || '').trim(),
+    customerVisibleNoteUpdatedAt: nowIso,
+    customerVisibleNoteUpdatedByRole: 'advisor',
+    customerVisibleNoteUpdatedByName: currentAdvisorName,
+    updatedAt: nowIso,
+  };
+
+  if (optionalStatus && ['new', 'contacted', 'closed', 'resolved'].includes(optionalStatus)) {
+    updatePayload.status = optionalStatus === 'resolved' ? 'closed' : optionalStatus;
+    updatePayload.isRead = true;
+  }
 
   await updateDoc(docRef, updatePayload);
   const snap = await getDoc(docRef);
@@ -816,7 +862,8 @@ export async function getAgentProfile() {
         name: d.name || agentAuth.currentUser.displayName || 'Advisor',
         email: d.email || agentAuth.currentUser.email || '',
         phone: d.phone || '',
-        avatar: d.avatar || '',
+        avatar: d.avatar || d.photoDataUrl || '',
+        photoDataUrl: d.photoDataUrl || d.avatar || '',
         title: d.title || 'Senior Luxury Property Consultant',
         agency: d.agency || d.requestedAgency || 'EstateVista Advisory Services',
         experienceYears: Number(d.experienceYears) || 5,
@@ -856,7 +903,8 @@ export async function updateAgentProfile(profileUpdates) {
   const safeUpdates = {
     name: profileUpdates.name?.trim() || '',
     phone: profileUpdates.phone?.trim() || '',
-    avatar: profileUpdates.avatar || '',
+    avatar: profileUpdates.avatar || profileUpdates.photoDataUrl || '',
+    photoDataUrl: profileUpdates.photoDataUrl || profileUpdates.avatar || '',
     title: profileUpdates.title?.trim() || '',
     agency: profileUpdates.agency?.trim() || '',
     experienceYears: Number(profileUpdates.experienceYears) || 0,
@@ -867,6 +915,42 @@ export async function updateAgentProfile(profileUpdates) {
   };
 
   await setDoc(userRef, safeUpdates, { merge: true });
+  const snap = await getDoc(userRef);
+  return { id: snap.id, ...snap.data() };
+}
+
+/**
+ * Update advisor profile photo directly in Cloud Firestore (/users/{uid})
+ * Stores the optimized base64 Data URL or clears it when removed,
+ * completely bypassing Firebase Storage.
+ * 
+ * @param {string} photoDataUrl Compressed base64 data URL or empty string to remove
+ * @returns {Promise<Object>} Updated profile document
+ */
+export async function updateAgentProfilePhoto(photoDataUrl = '') {
+  const currentUid = agentAuth?.currentUser?.uid;
+  if (!isFirebaseConfigured || !agentDb || !currentUid) {
+    throw new Error('Authentication required to update advisor profile photo.');
+  }
+
+  const sanitized = typeof photoDataUrl === 'string' ? photoDataUrl.trim() : '';
+
+  // Max payload size check: 150 KB max
+  if (sanitized && sanitized.length > 150 * 1024) {
+    throw new Error('Profile photo payload exceeds the 150 KB Firestore document safety limit.');
+  }
+
+  const userRef = doc(agentDb, 'users', currentUid);
+  const nowIso = new Date().toISOString();
+
+  const photoPayload = {
+    avatar: sanitized,
+    photoDataUrl: sanitized,
+    photoUpdatedAt: nowIso,
+    updatedAt: nowIso,
+  };
+
+  await setDoc(userRef, photoPayload, { merge: true });
   const snap = await getDoc(userRef);
   return { id: snap.id, ...snap.data() };
 }

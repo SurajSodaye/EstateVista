@@ -19,6 +19,10 @@ export default function PropertyInquiryForm({
   agentName = 'the property advisor',
   propertyId,
   advisorUid,
+  propertyThumbnail,
+  propertyLocation,
+  propertyPrice,
+  propertyListingType,
 }) {
   const { currentUser, userProfile } = useAuth();
   const [formData, setFormData] = useState({
@@ -68,7 +72,7 @@ export default function PropertyInquiryForm({
     try {
       const isRealUid = isLikelyFirebaseUid(advisorUid);
       const effectiveAdvisorUid = isRealUid ? advisorUid.trim() : '';
-      const effectiveAdvisorName = isRealUid ? (agentName || '') : '';
+      const effectiveAdvisorName = agentName ? agentName.trim() : '';
       const nowIso = new Date().toISOString();
 
       const payload = {
@@ -77,6 +81,10 @@ export default function PropertyInquiryForm({
         assignedAgentName: effectiveAdvisorName,
         propertyId: propertyId ? String(propertyId) : '',
         propertyTitle: propertyTitle || 'Exclusive Property Listing',
+        propertyThumbnail: propertyThumbnail || null,
+        propertyLocation: propertyLocation || '',
+        propertyPrice: propertyPrice || null,
+        propertyListingType: propertyListingType || null,
         subject: propertyTitle ? `Inquiry: ${propertyTitle}` : 'Property Inquiry',
         clientName: formData.name.trim(),
         name: formData.name.trim(),
@@ -88,6 +96,10 @@ export default function PropertyInquiryForm({
         status: 'new',
         agentNotes: '',
         adminNotes: '',
+        customerVisibleNote: '',
+        customerVisibleNoteUpdatedAt: null,
+        customerVisibleNoteUpdatedByRole: null,
+        customerVisibleNoteUpdatedByName: null,
         isRead: false,
         source: 'property_inquiry',
         createdAt: nowIso,

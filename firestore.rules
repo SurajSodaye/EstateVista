@@ -34,8 +34,16 @@ service cloud.firestore {
 
     // 1. Users collection: /users/{userId}
     match /users/{userId} {
-      // Users can only read their own profile; admins can read any profile
-      allow read: if isOwner(userId) || isAdmin();
+      // Users can only read their own profile; admins can read any profile;
+      // Approved advisors' profiles are publicly readable for public directory and profiles
+      allow read: if isOwner(userId)
+                  || isAdmin()
+                  || (
+                    resource.data.role == 'agent'
+                    && resource.data.advisorStatus == 'approved'
+                    && (!('accountStatus' in resource.data) || resource.data.accountStatus != 'suspended')
+                    && (!('status' in resource.data) || resource.data.status != 'suspended')
+                  );
 
       // On profile creation during registration:
       // - Must be authenticated owner

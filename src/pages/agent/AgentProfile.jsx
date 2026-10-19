@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   User,
   Building2,
@@ -15,22 +15,38 @@ import {
   X,
   Upload,
   ExternalLink,
+  Trash2,
+  Check,
 } from 'lucide-react';
 import Button from '../../components/common/Button';
 import Input from '../../components/common/Input';
 import LoadingState from '../../components/common/LoadingState';
 import { useAgentAuth } from '../../context/AgentAuthContext';
-import { getAgentProfile, updateAgentProfile, uploadAgentMedia } from '../../services/agentPortalService';
+import {
+  getAgentProfile,
+  updateAgentProfile,
+  updateAgentProfilePhoto,
+} from '../../services/agentPortalService';
+import { processProfileImage, getInitials } from '../../utils/imageProcessor';
 
 export default function AgentProfile() {
   const { agentUser, agentProfile, refreshAgentProfile } = useAgentAuth();
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [errors, setErrors] = useState({});
+
+  // Dynamic Profile Photo states (Direct Firestore, no Firebase Storage)
+  const fileInputRef = useRef(null);
+  const [pendingPhoto, setPendingPhoto] = useState(null); // { dataUrl, sizeBytes }
+  const [processingPhoto, setProcessingPhoto] = useState(false);
+  const [savingPhoto, setSavingPhoto] = useState(false);
+  const [removingPhoto, setRemovingPhoto] = useState(false);
+  const [photoError, setPhotoError] = useState('');
+  const [photoSuccess, setPhotoSuccess] = useState('');
+  const [avatarImgError, setAvatarImgError] = useState(false);
 
   // Input states for tags
   const [newLocationInput, setNewLocationInput] = useState('');
@@ -130,27 +146,93 @@ export default function AgentProfile() {
     return Object.keys(errs).length === 0;
   };
 
-  const handleAvatarFileUpload = async (e) => {
+  // Profile photo file selection handler (Browser-native local processing)
+  const handlePhotoFileSelect = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 5 * 1024 * 1024) {
-      setErrorMessage('Avatar image size must be under 5MB.');
-      return;
-    }
+    setPhotoError('');
+    setPhotoSuccess('');
+    setProcessingPhoto(true);
 
-    setUploadingAvatar(true);
-    setErrorMessage('');
     try {
-      const downloadUrl = await uploadAgentMedia(file, 'avatars');
-      setProfile((prev) => ({ ...prev, avatar: downloadUrl }));
-      setSuccessMessage('Avatar uploaded to Firebase Storage successfully.');
-      setTimeout(() => setSuccessMessage(''), 3000);
+      // Validates file format, decode capability, crops to 256x256, compresses, and enforces 150KB limit
+      const result = await processProfileImage(file, { dimension: 256, maxBytes: 150 * 1024 });
+      setPendingPhoto({
+        dataUrl: result.dataUrl,
+        sizeBytes: result.sizeBytes,
+      });
+      setAvatarImgError(false);
     } catch (err) {
-      console.error('Avatar upload failed:', err);
-      setErrorMessage('Failed to upload avatar to Firebase Storage: ' + (err.message || 'Unknown error'));
+      console.error('[AgentProfile] Image processing failed:', err);
+      setPhotoError(err.message || 'Failed to process image. Please try another photo.');
     } finally {
-      setUploadingAvatar(false);
+      setProcessingPhoto(false);
+      // Reset input value so re-selecting the same file triggers onChange
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleCancelPendingPhoto = () => {
+    setPendingPhoto(null);
+    setPhotoError('');
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleSavePhoto = async () => {
+    if (!pendingPhoto?.dataUrl) return;
+
+    setSavingPhoto(true);
+    setPhotoError('');
+    setPhotoSuccess('');
+
+    try {
+      await updateAgentProfilePhoto(pendingPhoto.dataUrl);
+      setProfile((prev) => ({
+        ...prev,
+        avatar: pendingPhoto.dataUrl,
+        photoDataUrl: pendingPhoto.dataUrl,
+      }));
+      setPendingPhoto(null);
+      await refreshAgentProfile();
+      setPhotoSuccess('Profile photo updated successfully and synchronized to your advisor account.');
+      setTimeout(() => setPhotoSuccess(''), 4500);
+    } catch (err) {
+      console.error('[AgentProfile] Failed to save profile photo:', err);
+      setPhotoError(err.message || 'Failed to save profile photo to Firestore.');
+    } finally {
+      setSavingPhoto(false);
+    }
+  };
+
+  const handleRemovePhoto = async () => {
+    if (!profile?.avatar) return;
+
+    setRemovingPhoto(true);
+    setPhotoError('');
+    setPhotoSuccess('');
+
+    try {
+      await updateAgentProfilePhoto('');
+      setProfile((prev) => ({
+        ...prev,
+        avatar: '',
+        photoDataUrl: '',
+      }));
+      setPendingPhoto(null);
+      setAvatarImgError(false);
+      await refreshAgentProfile();
+      setPhotoSuccess('Profile photo removed. Initial avatar restored.');
+      setTimeout(() => setPhotoSuccess(''), 4500);
+    } catch (err) {
+      console.error('[AgentProfile] Failed to remove photo:', err);
+      setPhotoError(err.message || 'Failed to remove photo from Firestore.');
+    } finally {
+      setRemovingPhoto(false);
     }
   };
 
@@ -208,7 +290,7 @@ export default function AgentProfile() {
 
       {/* Main Form */}
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Profile Card Preview & Avatar Upload */}
+        {/* Profile Card Preview & Dynamic Avatar Upload */}
         <div className="bg-white rounded-2xl border border-sage p-6 shadow-soft space-y-6">
           <div className="flex items-center gap-2.5 pb-4 border-b border-sage/60">
             <div className="w-8 h-8 rounded-lg bg-forest/10 text-forest flex items-center justify-center">
@@ -224,44 +306,144 @@ export default function AgentProfile() {
             </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-center gap-6">
-            <div className="relative group shrink-0">
-              <img
-                src={profile.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80'}
-                alt={profile.name}
-                className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl object-cover border-2 border-forest/20 shadow-md"
-                onError={(e) => {
-                  e.target.src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80';
-                }}
-              />
-              <span className="absolute -bottom-1.5 -right-1.5 w-6 h-6 bg-forest text-gold rounded-full flex items-center justify-center border-2 border-white shadow text-[10px] font-bold">
-                ✓
-              </span>
+          {/* Photo-specific Feedback Messages */}
+          {photoSuccess && (
+            <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs font-semibold flex items-center gap-2 animate-in fade-in duration-200">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{photoSuccess}</span>
+            </div>
+          )}
+
+          {photoError && (
+            <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-300 text-rose-800 text-xs font-semibold flex items-center gap-2 animate-in fade-in duration-200">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>{photoError}</span>
+            </div>
+          )}
+
+          <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
+            {/* Avatar Display */}
+            <div className="relative shrink-0">
+              {pendingPhoto?.dataUrl ? (
+                <div className="relative">
+                  <img
+                    src={pendingPhoto.dataUrl}
+                    alt="New Photo Preview"
+                    className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl object-cover border-2 border-gold shadow-md"
+                  />
+                  <span className="absolute -bottom-2 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-gold text-forest text-[9px] font-bold uppercase rounded-full shadow border border-white tracking-wider whitespace-nowrap">
+                    Preview
+                  </span>
+                </div>
+              ) : (profile.avatar && !avatarImgError) ? (
+                <div className="relative">
+                  <img
+                    src={profile.avatar}
+                    alt={profile.name || 'Advisor'}
+                    onError={() => setAvatarImgError(true)}
+                    className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl object-cover border-2 border-forest/20 shadow-md"
+                  />
+                  <span
+                    className="absolute -bottom-1.5 -right-1.5 w-6 h-6 bg-forest text-gold rounded-full flex items-center justify-center border-2 border-white shadow text-[10px] font-bold"
+                    title="Verified Photo Active"
+                  >
+                    ✓
+                  </span>
+                </div>
+              ) : (
+                <div
+                  aria-label={profile.name || 'Advisor Initials'}
+                  className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl bg-forest text-gold border-2 border-forest/20 shadow-md flex items-center justify-center font-serif text-2xl sm:text-3xl font-bold tracking-wider"
+                >
+                  {getInitials(profile.name || agentUser?.displayName || 'Advisor')}
+                </div>
+              )}
             </div>
 
+            {/* Photo Action Controls */}
             <div className="flex-1 w-full space-y-3">
-              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                <label className="cursor-pointer inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-sage-light hover:bg-sage text-forest text-xs font-semibold border border-sage transition-colors">
-                  <Upload className="w-4 h-4" />
-                  <span>{uploadingAvatar ? 'Uploading to Firebase Storage...' : 'Upload Image File'}</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    disabled={uploadingAvatar}
-                    onChange={handleAvatarFileUpload}
-                    className="hidden"
-                  />
-                </label>
-                <span className="text-xs text-mutedText">or paste image URL below</span>
-              </div>
-              <Input
-                label="Portrait Image URL"
-                name="avatar"
-                value={profile.avatar || ''}
-                onChange={handleInputChange}
-                placeholder="https://images.unsplash.com/..."
-                helperText="Upload a portrait file to Firebase Storage or enter a valid image URL."
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/jpg"
+                disabled={processingPhoto || savingPhoto || removingPhoto}
+                onChange={handlePhotoFileSelect}
+                className="hidden"
               />
+
+              {pendingPhoto ? (
+                <div className="p-4 rounded-xl bg-ivory/80 border border-gold/40 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-bold text-forest flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-gold" />
+                        <span>Ready to Save New Photo</span>
+                      </p>
+                      <p className="text-[11px] text-mutedText">
+                        Optimized size: ~{Math.round(pendingPhoto.sizeBytes / 1024)} KB (256×256 px)
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        icon={Check}
+                        isLoading={savingPhoto}
+                        onClick={handleSavePhoto}
+                      >
+                        Save Photo
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        icon={X}
+                        disabled={savingPhoto}
+                        onClick={handleCancelPendingPhoto}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-mutedText">
+                    Click <strong>Save Photo</strong> to store this photo in Cloud Firestore, or <strong>Cancel</strong> to discard the preview.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      icon={Upload}
+                      isLoading={processingPhoto}
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      {profile.avatar ? 'Replace Photo' : 'Upload Photo'}
+                    </Button>
+
+                    {profile.avatar && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        icon={Trash2}
+                        isLoading={removingPhoto}
+                        onClick={handleRemovePhoto}
+                        className="text-rose-700 hover:text-rose-800 border-rose-200 hover:bg-rose-50"
+                      >
+                        Remove Photo
+                      </Button>
+                    )}
+                  </div>
+
+                  <p className="text-xs text-mutedText leading-relaxed">
+                    Upload your profile portrait in <strong>JPG, JPEG, PNG, or WebP</strong> format (max 10MB input)
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 

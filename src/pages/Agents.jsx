@@ -1,9 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { ShieldCheck, Search, Users, Award, Sparkles, MapPin } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { ShieldCheck, Search, Users, AlertCircle, RotateCw, MapPin } from 'lucide-react';
 import AgentCard from '../components/agent/AgentCard';
 import LoadingState from '../components/common/LoadingState';
 import EmptyState from '../components/common/EmptyState';
+import Button from '../components/common/Button';
 import { getAllAgents } from '../services/agentService';
+
+const DEFAULT_METROS = ['All', 'Mumbai', 'Bengaluru', 'Delhi NCR', 'Pune', 'Goa', 'Hyderabad'];
 
 export default function Agents() {
   const [agents, setAgents] = useState([]);
@@ -11,31 +14,40 @@ export default function Agents() {
   const [selectedLocation, setSelectedLocation] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const locations = ['All', 'Mumbai', 'Bengaluru', 'Delhi NCR', 'Pune', 'Goa', 'Hyderabad'];
+  const loadAgents = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const data = await getAllAgents();
+      setAgents(data);
+      setFilteredAgents(data);
+    } catch (err) {
+      console.error('[Agents Page] Failed to load advisors from Firestore:', err);
+      setError('Unable to load accredited property advisors from Cloud Firestore. Please check your network connection and retry.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    async function loadAgents() {
-      setIsLoading(true);
-      try {
-        const data = await getAllAgents();
-        setAgents(data);
-        setFilteredAgents(data);
-      } catch (err) {
-        console.error('Failed to load agents', err);
-      } finally {
-        setIsLoading(false);
-      }
-    }
     loadAgents();
-  }, []);
+  }, [loadAgents]);
+
+  // Compute available locations dynamically from actual advisor data + default luxury metros
+  const locations = useMemo(() => {
+    const fromData = agents.flatMap((a) => a.serviceLocations || []).filter(Boolean);
+    const combined = ['All', ...new Set([...fromData, ...DEFAULT_METROS.slice(1)])];
+    return combined.slice(0, 8);
+  }, [agents]);
 
   useEffect(() => {
     let result = [...agents];
 
     if (selectedLocation !== 'All') {
       result = result.filter((a) =>
-        a.serviceLocations.some(
+        (a.serviceLocations || []).some(
           (loc) => loc.toLowerCase() === selectedLocation.toLowerCase()
         )
       );
@@ -45,9 +57,10 @@ export default function Agents() {
       const q = searchQuery.toLowerCase().trim();
       result = result.filter(
         (a) =>
-          a.name.toLowerCase().includes(q) ||
-          a.agency.toLowerCase().includes(q) ||
-          a.specialties.some((s) => s.toLowerCase().includes(q))
+          (a.name || '').toLowerCase().includes(q) ||
+          (a.agency || '').toLowerCase().includes(q) ||
+          (a.title || '').toLowerCase().includes(q) ||
+          (a.specialties || []).some((s) => s.toLowerCase().includes(q))
       );
     }
 
@@ -68,11 +81,6 @@ export default function Agents() {
         <p className="text-xs sm:text-base text-mutedText leading-relaxed">
           Connect with trusted luxury property consultants and regional specialists who represent premier residential and commercial assets with absolute discretion.
         </p>
-
-        {/* Demo Notice Banner */}
-        <div className="mt-5 p-3 rounded-xl bg-ivory border border-sage/60 text-xs text-mutedText max-w-xl mx-auto">
-          <span className="font-semibold text-forest">Demonstration Directory:</span> Profiles shown below represent certified advisor models staged for future Firebase identity verification.
-        </div>
       </div>
 
       {/* Filter and Search Bar */}
@@ -108,15 +116,42 @@ export default function Agents() {
         </div>
       </div>
 
-      {/* Directory Grid */}
+      {/* Directory Grid & States */}
       {isLoading ? (
-        <LoadingState message="Loading luxury advisor profiles..." />
+        <LoadingState message="Synchronizing luxury advisor directory from Cloud Firestore..." />
+      ) : error ? (
+        <div className="bg-white rounded-3xl p-10 border border-red-200 text-center max-w-lg mx-auto space-y-4 shadow-soft">
+          <div className="w-12 h-12 rounded-2xl bg-red-50 text-red-600 flex items-center justify-center mx-auto border border-red-200">
+            <AlertCircle className="w-6 h-6" />
+          </div>
+          <h3 className="font-serif text-xl font-bold text-charcoal">Unable to Load Advisors</h3>
+          <p className="text-xs text-mutedText leading-relaxed">{error}</p>
+          <Button
+            variant="outline"
+            size="sm"
+            icon={RotateCw}
+            onClick={loadAgents}
+            className="mx-auto"
+          >
+            Retry Connection
+          </Button>
+        </div>
+      ) : agents.length === 0 ? (
+        <EmptyState
+          icon={Users}
+          title="No Accredited Advisors Registered Yet"
+          description="Our advisory directory is currently being updated with certified luxury consultants. Check back soon or contact our concierge desk directly."
+          actionText="Contact Concierge"
+          onAction={() => {
+            window.location.href = '/contact';
+          }}
+        />
       ) : filteredAgents.length === 0 ? (
         <EmptyState
           icon={Users}
-          title="No advisors found"
-          description="Try selecting another city or clearing your search keywords."
-          actionText="View All Advisors"
+          title="No Matching Advisors Found"
+          description={`No certified advisors matched "${searchQuery || selectedLocation}". Try clearing your search keywords or switching locations.`}
+          actionText="Reset Filter"
           onAction={() => {
             setSelectedLocation('All');
             setSearchQuery('');

@@ -20,6 +20,7 @@ import {
 import Button from '../common/Button';
 import { useAgentAuth } from '../../context/AgentAuthContext';
 import { getAgentProfile } from '../../services/agentPortalService';
+import { getInitials } from '../../utils/imageProcessor';
 
 export default function AgentLayout() {
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
@@ -39,6 +40,7 @@ export default function AgentLayout() {
   const displayName = userProfile?.name || currentUser?.displayName || profile?.name || 'Advisor';
   const displayAgency = userProfile?.agency || userProfile?.requestedAgency || profile?.agency || 'EstateVista Advisory Network';
   const displayEmail = currentUser?.email || profile?.email || '';
+  const avatarSrc = userProfile?.avatar || userProfile?.photoDataUrl || profile?.avatar || profile?.photoDataUrl || '';
 
   useEffect(() => {
     let isMounted = true;
@@ -132,12 +134,26 @@ export default function AgentLayout() {
 
         {/* Advisor Profile Summary Card */}
         <div className="p-4 mx-3 my-3 rounded-2xl bg-sage-light/60 border border-sage/70 flex items-center gap-3">
-          <div className="relative">
-            <img
-              src={profile?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80'}
-              alt={profile?.name || 'Agent'}
-              className="w-11 h-11 rounded-xl object-cover border border-forest/20 shadow-xs"
-            />
+          <div className="relative shrink-0">
+            {avatarSrc ? (
+              <img
+                src={avatarSrc}
+                alt={displayName}
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                  if (e.currentTarget.nextSibling) {
+                    e.currentTarget.nextSibling.style.display = 'flex';
+                  }
+                }}
+                className="w-11 h-11 rounded-xl object-cover border border-forest/20 shadow-xs"
+              />
+            ) : null}
+            <div
+              style={{ display: avatarSrc ? 'none' : 'flex' }}
+              className="w-11 h-11 rounded-xl bg-forest text-gold border border-forest/20 shadow-xs items-center justify-center font-serif text-sm font-bold"
+            >
+              {getInitials(displayName)}
+            </div>
             <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-emerald-500 border-2 border-white rounded-full" title="Active Advisor Session" />
           </div>
           <div className="min-w-0 flex-1">
@@ -329,11 +345,25 @@ export default function AgentLayout() {
                 className="flex items-center gap-2 p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl hover:bg-sage/40 transition-colors border border-transparent hover:border-sage/60"
                 aria-expanded={isProfileMenuOpen}
               >
-                <img
-                  src={profile?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80'}
-                  alt={profile?.name || 'Agent'}
-                  className="w-8 h-8 rounded-lg object-cover border border-forest/20"
-                />
+                {avatarSrc ? (
+                  <img
+                    src={avatarSrc}
+                    alt={displayName}
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                      if (e.currentTarget.nextSibling) {
+                        e.currentTarget.nextSibling.style.display = 'flex';
+                      }
+                    }}
+                    className="w-8 h-8 rounded-lg object-cover border border-forest/20 shrink-0"
+                  />
+                ) : null}
+                <div
+                  style={{ display: avatarSrc ? 'none' : 'flex' }}
+                  className="w-8 h-8 rounded-lg bg-forest text-gold border border-forest/20 items-center justify-center font-serif text-xs font-bold shrink-0"
+                >
+                  {getInitials(displayName)}
+                </div>
                 <span className="hidden sm:block text-xs font-semibold text-charcoal text-left max-w-[110px] truncate">
                   {displayName}
                 </span>

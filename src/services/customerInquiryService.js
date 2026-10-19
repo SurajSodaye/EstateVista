@@ -3,18 +3,95 @@ import { db, isFirebaseConfigured } from '../lib/firebase.js';
 import { DEMO_PROPERTIES } from '../data/properties.js';
 
 /**
- * Enriches an inquiry document with property metadata (thumbnail, location, price)
- * from the demonstration properties catalog or listing reference.
+ * Parses any Firestore timestamp representation (Timestamp object, seconds, ISO string, Date)
+ * into a valid ISO 8601 string.
+ * @param {*} val
+ * @returns {string}
+ */
+export function parseTimestampToIso(val) {
+  if (!val) return new Date().toISOString();
+  if (typeof val.toDate === 'function') {
+    return val.toDate().toISOString();
+  }
+  if (typeof val.seconds === 'number') {
+    return new Date(val.seconds * 1000).toISOString();
+  }
+  if (typeof val === 'string') {
+    const d = new Date(val);
+    if (!isNaN(d.getTime())) return d.toISOString();
+  }
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    return val.toISOString();
+  }
+  return new Date().toISOString();
+}
+
+/**
+ * Normalizes raw Firestore inquiry document data to a consistent, strongly typed schema
+ * @param {string} id
+ * @param {Object} data
+ * @returns {Object}
+ */
+export function normalizeInquiryDoc(id, data = {}) {
+  const createdAt = parseTimestampToIso(data.createdAt || data.date);
+  const updatedAt = parseTimestampToIso(data.updatedAt || data.createdAt || data.date);
+  const isGeneral = !data.propertyId || data.source === 'contact_form';
+
+  return {
+    id,
+    customerUid: data.customerUid || '',
+    clientName: data.clientName || data.name || 'Member',
+    clientEmail: data.clientEmail || data.senderEmail || '',
+    clientPhone: data.clientPhone || data.phone || '',
+    propertyId: data.propertyId ? String(data.propertyId) : null,
+    propertyTitle: isGeneral
+      ? (data.subject ? `General Inquiry: ${data.subject}` : 'General Concierge Inquiry')
+      : (data.propertyTitle || data.subject || 'Exclusive Property Listing'),
+    subject: data.subject || '',
+    message: data.message || '',
+    status: (data.status || 'new').toLowerCase(),
+    assignedAgentName: data.assignedAgentName || '',
+    advisorUid: data.advisorUid || '',
+    // Administrative follow-up notes (from platform administrator)
+    adminNotes: (data.adminNotes || data.customerVisibleNote || data.adminNote || '').trim(),
+    adminNotesUpdatedAt: data.adminNotesUpdatedAt
+      ? parseTimestampToIso(data.adminNotesUpdatedAt)
+      : (data.customerVisibleNoteUpdatedAt
+          ? parseTimestampToIso(data.customerVisibleNoteUpdatedAt)
+          : ((data.adminNotes || data.customerVisibleNote) && data.updatedAt
+              ? parseTimestampToIso(data.updatedAt)
+              : null)),
+    // Agent / Advisor notes (from assigned property advisor)
+    agentNotes: (data.agentNotes || data.advisorNotes || (!data.adminNotes && data.notes ? data.notes : '') || '').trim(),
+    agentNotesUpdatedAt: data.agentNotesUpdatedAt
+      ? parseTimestampToIso(data.agentNotesUpdatedAt)
+      : (data.notesUpdatedAt
+          ? parseTimestampToIso(data.notesUpdatedAt)
+          : ((data.agentNotes || data.notes) && data.updatedAt ? parseTimestampToIso(data.updatedAt) : null)),
+    source: data.source || (data.propertyId ? 'property_inquiry' : 'contact_form'),
+    propertyThumbnail: data.propertyThumbnail || null,
+    propertyLocation: data.propertyLocation || null,
+    propertyPrice: data.propertyPrice || null,
+    propertyListingType: data.propertyListingType || null,
+    isGeneral,
+    createdAt,
+    updatedAt,
+  };
+}
+
+/**
+ * Enriches an inquiry document with property metadata (thumbnail, location, price, listingType)
+ * from the stored payload or fallback demonstration properties catalog.
  * @param {Object} inquiry
  * @returns {Object}
  */
 export function enrichInquiryWithProperty(inquiry) {
   if (!inquiry) return inquiry;
 
-  let propertyThumbnail = null;
-  let propertyLocation = null;
-  let propertyPrice = null;
-  let propertyListingType = null;
+  let propertyThumbnail = inquiry.propertyThumbnail || null;
+  let propertyLocation = inquiry.propertyLocation || null;
+  let propertyPrice = inquiry.propertyPrice || null;
+  let propertyListingType = inquiry.propertyListingType || null;
 
   if (inquiry.propertyId) {
     const matched = DEMO_PROPERTIES.find(
@@ -22,10 +99,10 @@ export function enrichInquiryWithProperty(inquiry) {
     );
 
     if (matched) {
-      propertyThumbnail = matched.imageUrls?.[0] || null;
-      propertyLocation = matched.location || `${matched.locality || ''}, ${matched.city || ''}`;
-      propertyPrice = matched.price || null;
-      propertyListingType = matched.listingType || null;
+      if (!propertyThumbnail) propertyThumbnail = matched.imageUrls?.[0] || null;
+      if (!propertyLocation) propertyLocation = matched.location || `${matched.locality || ''}, ${matched.city || ''}`;
+      if (!propertyPrice) propertyPrice = matched.price || null;
+      if (!propertyListingType) propertyListingType = matched.listingType || null;
     }
   }
 
@@ -35,32 +112,6 @@ export function enrichInquiryWithProperty(inquiry) {
     propertyLocation: propertyLocation || (inquiry.propertyId ? 'Verified Luxury Listing' : 'Private Concierge Desk'),
     propertyPrice,
     propertyListingType,
-  };
-}
-
-/**
- * Normalizes raw Firestore inquiry document data to consistent schema
- * @param {string} id
- * @param {Object} data
- * @returns {Object}
- */
-function normalizeInquiryDoc(id, data) {
-  const createdAt = data.createdAt || data.date || new Date().toISOString();
-  return {
-    id,
-    customerUid: data.customerUid || '',
-    clientName: data.clientName || data.name || 'Member',
-    clientEmail: data.clientEmail || data.senderEmail || '',
-    clientPhone: data.clientPhone || data.phone || '',
-    propertyId: data.propertyId || null,
-    propertyTitle: data.propertyTitle || (data.subject ? `Subject: ${data.subject}` : 'General Concierge Inquiry'),
-    subject: data.subject || '',
-    message: data.message || '',
-    status: data.status || 'new',
-    assignedAgentName: data.assignedAgentName || '',
-    source: data.source || (data.propertyId ? 'property_inquiry' : 'contact_form'),
-    createdAt,
-    updatedAt: data.updatedAt || createdAt,
   };
 }
 

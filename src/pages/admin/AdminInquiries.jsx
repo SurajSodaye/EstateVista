@@ -125,7 +125,12 @@ export default function AdminInquiries() {
         adminUser?.email || 'Administrator'
       );
       if (ok) {
-        showSuccessNotification('Internal administrative notes successfully saved.');
+        showSuccessNotification('Administrative follow-up notes successfully saved and synced to client view.');
+        setSelectedInquiry((prev) => ({
+          ...prev,
+          adminNotes: modalAdminNotes.trim(),
+          adminNotesUpdatedAt: new Date().toISOString(),
+        }));
       } else {
         setErrorMessage('Failed to save administrative notes.');
       }
@@ -167,6 +172,60 @@ export default function AdminInquiries() {
       setAssigningAdvisor(false);
     }
   };
+
+  const isTestInquiry = (inq) => {
+    const email = (inq.clientEmail || inq.senderEmail || '').toLowerCase();
+    const name = (inq.clientName || inq.senderName || '').toLowerCase();
+    const msg = (inq.message || '').toLowerCase();
+    return (
+      email.includes('@estatevista.test') ||
+      email.includes('@example.com') ||
+      email.includes('anonymous.buyer') ||
+      email.includes('test-customer') ||
+      name.includes('aarav sharma') ||
+      name.includes('guest visitor') ||
+      name.includes('customer a') ||
+      name.includes('customer b') ||
+      msg.includes('testing customer inquiry') ||
+      msg.includes('public inquiry without account')
+    );
+  };
+
+  const [cleaningTests, setCleaningTests] = useState(false);
+
+  const handleCleanAllTestInquiries = async () => {
+    const testList = inquiries.filter(isTestInquiry);
+    if (testList.length === 0) {
+      showSuccessNotification('No automated test inquiries detected.');
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Permanently remove all ${testList.length} automated test inquiries from Cloud Firestore? Genuine customer inquiries (such as user@gmail.com) will be preserved.`
+      )
+    ) {
+      return;
+    }
+
+    setCleaningTests(true);
+    setErrorMessage('');
+    let deletedCount = 0;
+    try {
+      for (const inq of testList) {
+        await deleteFirestoreInquiry(inq.id, adminUser?.email || 'Administrator');
+        deletedCount++;
+      }
+      showSuccessNotification(`Successfully purged ${deletedCount} test inquiries from Cloud Firestore.`);
+    } catch (err) {
+      console.error('Failed to clean test inquiries:', err);
+      setErrorMessage(err.message || 'Error purging some test inquiries.');
+    } finally {
+      setCleaningTests(false);
+    }
+  };
+
+  const testInquiriesCount = inquiries.filter(isTestInquiry).length;
 
   const handleDeleteInquiry = async (id) => {
     if (!window.confirm('Delete this client inquiry permanently from Cloud Firestore? This action cannot be undone.')) return;
@@ -236,6 +295,19 @@ export default function AdminInquiries() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
+          {testInquiriesCount > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              icon={Trash2}
+              onClick={handleCleanAllTestInquiries}
+              isLoading={cleaningTests}
+              disabled={cleaningTests}
+              className="text-xs text-red-600 border-red-300 hover:bg-red-50 hover:text-red-700 font-semibold cursor-pointer shadow-xs"
+            >
+              Purge {testInquiriesCount} Test Inquiries
+            </Button>
+          )}
           <span className="px-3 py-1 rounded-xl bg-ivory border border-sage/60 text-mutedText">
             Total: <strong className="text-forest">{counts.total}</strong>
           </span>
@@ -379,9 +451,9 @@ export default function AdminInquiries() {
                     )}
 
                     {inq.adminNotes && (
-                      <span className="inline-flex items-center gap-1 text-[11px] text-mutedText">
+                      <span className="inline-flex items-center gap-1 text-[11px] text-forest font-medium bg-sage-light/60 border border-sage px-2 py-0.5 rounded-md">
                         <FileText className="w-3 h-3 text-forest shrink-0" />
-                        Has Admin Notes
+                        Has Follow-Up Notes
                       </span>
                     )}
                   </div>
@@ -413,6 +485,15 @@ export default function AdminInquiries() {
                   >
                     Inspect Lead
                   </Button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteInquiry(inq.id)}
+                    className="p-2 rounded-xl text-red-500 hover:text-red-700 hover:bg-red-50 border border-red-200 transition-colors cursor-pointer"
+                    title="Delete inquiry permanently from Firestore"
+                    aria-label="Delete inquiry permanently"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
             );
@@ -571,35 +652,40 @@ export default function AdminInquiries() {
               </div>
             </div>
 
-            {/* Administrative Internal Notes (adminNotes) */}
+            {/* Administrative Follow-Up Notes (adminNotes) */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="text-xs font-bold text-charcoal flex items-center gap-1.5">
-                    <Shield className="w-4 h-4 text-forest shrink-0" />
-                    Administrative Follow-Up Notes (Internal Admin Only)
+                    <FileText className="w-4 h-4 text-forest shrink-0" />
+                    Administrative Follow-Up Notes
                   </h4>
                   <p className="text-[11px] text-mutedText">
-                    Strictly confidential internal notes. Never visible to advisors or client visitors.
+                    Notes saved here will be visible to the customer in My Inquiries. Do not enter confidential internal information.
                   </p>
                 </div>
+                {selectedInquiry.adminNotesUpdatedAt && (
+                  <span className="text-[10px] text-forest bg-sage-light/60 px-2 py-0.5 rounded border border-sage font-mono">
+                    Updated: {new Date(selectedInquiry.adminNotesUpdatedAt).toLocaleString()}
+                  </span>
+                )}
               </div>
               <textarea
-                rows={3}
+                rows={4}
                 value={modalAdminNotes}
                 onChange={(e) => setModalAdminNotes(e.target.value)}
-                placeholder="Log internal concierge review, follow-up timelines, high-net-worth verification status..."
+                placeholder="Enter client-facing follow-up or resolution notes (e.g., 'Thank you for your inquiry. We have confirmed availability and an advisor will contact you today.')..."
                 className="w-full rounded-xl bg-white border border-sage p-3 text-xs text-charcoal focus:outline-none focus:ring-2 focus:ring-forest"
               />
               <div className="flex justify-end">
                 <Button
-                  variant="secondary"
+                  variant="primary"
                   size="sm"
                   icon={Save}
                   onClick={handleSaveAdminNotes}
                   isLoading={savingNotes}
                   disabled={savingNotes}
-                  className="text-xs"
+                  className="text-xs bg-forest hover:bg-forest-dark text-white"
                 >
                   Save Admin Notes
                 </Button>

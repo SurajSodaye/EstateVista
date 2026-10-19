@@ -29,6 +29,7 @@ import LoadingState from '../components/common/LoadingState';
 import NotFoundState from '../components/common/NotFoundState';
 import { getPropertyById, getRelatedProperties } from '../services/propertyService';
 import { getAgentById } from '../services/agentService';
+import { getInitials } from '../utils/imageProcessor';
 import { formatCurrency, formatArea } from '../utils/formatCurrency';
 import { formatDate } from '../utils/formatDate';
 
@@ -75,7 +76,7 @@ export default function PropertyDetails() {
             agency: propData.agent.agency || 'EstateVista Advisory Services',
             email: propData.agent.email || '',
             phone: propData.agent.phone || '',
-            avatar: propData.agent.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80',
+            avatar: propData.agent.avatar || propData.agent.photoDataUrl || '',
             experienceYears: propData.agent.experienceYears || 5,
             propertyCount: 1,
           } : null);
@@ -380,11 +381,25 @@ export default function PropertyDetails() {
                   Designated Advisory Consultant
                 </span>
                 <div className="flex items-center gap-4 mb-4">
-                  <img
-                    src={agent.avatar}
-                    alt={agent.name}
-                    className="w-16 h-16 rounded-2xl object-cover border-2 border-forest/20 shadow-sm"
-                  />
+                  {agent.avatar ? (
+                    <img
+                      src={agent.avatar}
+                      alt={agent.name}
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                        if (e.currentTarget.nextSibling) {
+                          e.currentTarget.nextSibling.style.display = 'flex';
+                        }
+                      }}
+                      className="w-16 h-16 rounded-2xl object-cover border-2 border-forest/20 shadow-sm shrink-0"
+                    />
+                  ) : null}
+                  <div
+                    style={{ display: agent.avatar ? 'none' : 'flex' }}
+                    className="w-16 h-16 rounded-2xl bg-forest text-gold border-2 border-forest/20 shadow-sm items-center justify-center font-serif text-lg font-bold shrink-0"
+                  >
+                    {getInitials(agent.name)}
+                  </div>
                   <div>
                     <Link to={`/agents/${agent.id}`} className="hover:text-forest transition-colors">
                       <h3 className="font-serif text-lg font-bold text-charcoal">
@@ -434,6 +449,10 @@ export default function PropertyDetails() {
                 agentName={agent?.name || property.agentName}
                 propertyId={property.id}
                 advisorUid={property.createdByUid || property.agentId || agent?.id || ''}
+                propertyThumbnail={property.imageUrls?.[0] || property.images?.[0] || property.thumbnail || null}
+                propertyLocation={property.location || (property.locality ? `${property.locality}, ${property.city}` : property.city) || ''}
+                propertyPrice={property.price || null}
+                propertyListingType={property.listingType || null}
               />
             </div>
           </div>
