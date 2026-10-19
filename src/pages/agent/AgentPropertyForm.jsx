@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   Building2,
@@ -10,12 +10,16 @@ import {
   Plus,
   Trash2,
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
   Save,
   Send,
   HelpCircle,
   CheckCircle2,
   Upload,
   X,
+  Star,
+  Loader2,
 } from 'lucide-react';
 import Button from '../../components/common/Button';
 import Input from '../../components/common/Input';
@@ -27,8 +31,13 @@ import {
   getAgentPropertyById,
   createAgentProperty,
   updateAgentProperty,
-  uploadAgentMedia,
 } from '../../services/agentPortalService';
+import {
+  uploadPropertyImage,
+  calculateGallerySize,
+  MAX_PROPERTY_IMAGES,
+  MAX_GALLERY_BUDGET_BYTES,
+} from '../../utils/imageProcessor';
 
 const PRESET_AMENITIES = [
   'Sea View',
@@ -67,7 +76,12 @@ export default function AgentPropertyForm() {
   const [successNotice, setSuccessNotice] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
 
-  const [uploadingImage, setUploadingImage] = useState(false);
+  // Photography State (Browser-native local compression directly to Firestore, No Firebase Storage)
+  const fileInputRef = useRef(null);
+  const [processingImages, setProcessingImages] = useState(false);
+  const [processingProgress, setProcessingProgress] = useState({ current: 0, total: 0 });
+  const [imageError, setImageError] = useState('');
+  const [imageNotice, setImageNotice] = useState('');
 
   // Form Fields State
   const [formData, setFormData] = useState({
@@ -99,41 +113,7 @@ export default function AgentPropertyForm() {
   const [newImageUrlInput, setNewImageUrlInput] = useState('');
   const [errors, setErrors] = useState({});
 
-  const handleImageFileUpload = async (e) => {
-    const files = Array.from(e.target.files || []);
-    if (!files.length) return;
 
-    setUploadingImage(true);
-    setErrors((prev) => ({ ...prev, imageUrls: null, storageNotice: null }));
-    try {
-      for (const file of files) {
-        if (!file.type || !file.type.startsWith('image/')) {
-          setErrors((prev) => ({ ...prev, imageUrls: 'Please select valid image files (JPEG, PNG, WebP).' }));
-          continue;
-        }
-        if (file.size > 10 * 1024 * 1024) {
-          setErrors((prev) => ({ ...prev, imageUrls: 'Each image must be under 10MB.' }));
-          continue;
-        }
-        const downloadUrl = await uploadAgentMedia(file, 'properties');
-        setFormData((prev) => ({
-          ...prev,
-          imageUrls: [...prev.imageUrls, downloadUrl],
-        }));
-      }
-    } catch (err) {
-      console.error('Image upload failed:', err);
-      setErrors((prev) => ({
-        ...prev,
-        imageUrls: err.message || 'Firebase Cloud Storage upload was unsuccessful.',
-        storageNotice:
-          'To enable direct file uploads: open Firebase Console > Build > Storage > Get Started, and apply storage.rules. You can also paste external image URLs below in the meantime.',
-      }));
-    } finally {
-      setUploadingImage(false);
-      e.target.value = '';
-    }
-  };
 
   // Load existing property when in edit mode
   useEffect(() => {
@@ -247,13 +227,105 @@ export default function AgentPropertyForm() {
     }
   };
 
-  // Image Management
+  // ==========================================
+  // Image & Gallery Management
+  // ==========================================
+
+  const handleImageFilesSelected = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
+    setImageError('');
+    setImageNotice('');
+
+    const currentCount = formData.imageUrls.length;
+    const availableSlots = MAX_PROPERTY_IMAGES - currentCount;
+
+    if (availableSlots <= 0) {
+      setImageError(`You have already attached the maximum allowed ${MAX_PROPERTY_IMAGES} photos for this property listing.`);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    let filesToProcess = files;
+    if (files.length > availableSlots) {
+      filesToProcess = files.slice(0, availableSlots);
+      setImageNotice(
+        `Added first ${availableSlots} photos. Maximum gallery capacity is ${MAX_PROPERTY_IMAGES} photos per property.`
+      );
+    }
+
+    setProcessingImages(true);
+    setProcessingProgress({ current: 0, total: filesToProcess.length });
+
+    const newlyAddedUrls = [];
+    const errorsList = [];
+
+    try {
+      for (let i = 0; i < filesToProcess.length; i++) {
+        const file = filesToProcess[i];
+        setProcessingProgress({ current: i + 1, total: filesToProcess.length });
+
+        try {
+          const uploadResult = await uploadPropertyImage(file, { maxWidth: 960, maxHeight: 640 });
+
+          // Budget validation for Firestore Base64 payload
+          const currentTotalBytes = calculateGallerySize([...formData.imageUrls, ...newlyAddedUrls]);
+          if (currentTotalBytes + uploadResult.sizeBytes > MAX_GALLERY_BUDGET_BYTES) {
+            errorsList.push(
+              `Skipped "${file.name}": Total property gallery budget limit (${Math.round(MAX_GALLERY_BUDGET_BYTES / 1024)} KB) reached.`
+            );
+            break;
+          }
+
+          newlyAddedUrls.push(uploadResult.url);
+        } catch (itemErr) {
+          console.warn(`Failed to process photo "${file.name}":`, itemErr);
+          errorsList.push(`"${file.name}": ${itemErr.message || 'Processing failed.'}`);
+        }
+      }
+
+      if (newlyAddedUrls.length > 0) {
+        setFormData((prev) => ({
+          ...prev,
+          imageUrls: [...prev.imageUrls, ...newlyAddedUrls],
+        }));
+        if (errors.imageUrls) {
+          setErrors((prev) => ({ ...prev, imageUrls: null }));
+        }
+      }
+
+      if (errorsList.length > 0) {
+        setImageError(errorsList.join(' • '));
+      } else if (!imageNotice && newlyAddedUrls.length > 0) {
+        setImageNotice(`Successfully added ${newlyAddedUrls.length} property photo${newlyAddedUrls.length > 1 ? 's' : ''}.`);
+        setTimeout(() => setImageNotice(''), 4000);
+      }
+    } finally {
+      setProcessingImages(false);
+      setProcessingProgress({ current: 0, total: 0 });
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
   const handleAddImageUrl = () => {
     const trimmed = newImageUrlInput.trim();
     if (!trimmed) return;
 
     if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
       setErrors((prev) => ({ ...prev, newImageUrl: 'Please enter a valid HTTP/HTTPS image URL' }));
+      return;
+    }
+
+    if (formData.imageUrls.length >= MAX_PROPERTY_IMAGES) {
+      setImageError(`Maximum gallery capacity of ${MAX_PROPERTY_IMAGES} photos reached.`);
+      return;
+    }
+
+    if (formData.imageUrls.includes(trimmed)) {
+      setErrors((prev) => ({ ...prev, newImageUrl: 'This image URL is already in the gallery.' }));
       return;
     }
 
@@ -272,16 +344,22 @@ export default function AgentPropertyForm() {
     }));
   };
 
-  const handleSetCoverImage = (indexToCover) => {
+  const handleMoveImage = (fromIndex, toIndex) => {
     setFormData((prev) => {
-      if (indexToCover <= 0 || indexToCover >= prev.imageUrls.length) return prev;
-      const targetUrl = prev.imageUrls[indexToCover];
-      const remaining = prev.imageUrls.filter((_, idx) => idx !== indexToCover);
+      if (toIndex < 0 || toIndex >= prev.imageUrls.length) return prev;
+      const updated = [...prev.imageUrls];
+      const [moved] = updated.splice(fromIndex, 1);
+      updated.splice(toIndex, 0, moved);
       return {
         ...prev,
-        imageUrls: [targetUrl, ...remaining],
+        imageUrls: updated,
       };
     });
+  };
+
+  const handleSetCoverImage = (indexToCover) => {
+    if (indexToCover <= 0) return;
+    handleMoveImage(indexToCover, 0);
   };
 
   // Form Validation
@@ -415,7 +493,7 @@ export default function AgentPropertyForm() {
             variant="outline"
             size="sm"
             onClick={() => navigate('/agent/properties')}
-            disabled={submitting}
+            disabled={submitting || processingImages}
           >
             Cancel
           </Button>
@@ -425,6 +503,7 @@ export default function AgentPropertyForm() {
             icon={Save}
             onClick={() => handleSubmit('draft')}
             isLoading={submitting}
+            disabled={processingImages}
           >
             Save as Draft
           </Button>
@@ -434,6 +513,7 @@ export default function AgentPropertyForm() {
             icon={Send}
             onClick={() => handleSubmit('pending')}
             isLoading={submitting}
+            disabled={processingImages}
           >
             Submit for Approval
           </Button>
@@ -934,37 +1014,94 @@ export default function AgentPropertyForm() {
             </label>
           </div>
 
-          {/* Property Imagery (Storage & URLs) */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="block text-xs font-semibold text-charcoal/80 uppercase tracking-wider">
-                Property Photographs <span className="text-red-500">*</span>
-              </label>
-              <span className="text-[11px] text-mutedText">
-                High-resolution JPEG, PNG, or WebP
-              </span>
+          {/* Property Imagery (Local Browser Compression directly to Firestore) */}
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-sage/40">
+              <div>
+                <label className="block text-xs font-semibold text-charcoal/80 uppercase tracking-wider">
+                  Property Photographs <span className="text-red-500">*</span>
+                </label>
+                <p className="text-[11px] text-mutedText">
+                  Upload multiple photos from your device. First photo is designated as the listing's primary cover photo.
+                </p>
+              </div>
+
+              {/* Gallery Metrics Badge */}
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-forest bg-sage-light px-2.5 py-1 rounded-lg border border-sage">
+                  <span>Gallery: {formData.imageUrls.length} / {MAX_PROPERTY_IMAGES} photos</span>
+                  {calculateGallerySize(formData.imageUrls) > 0 && (
+                    <span className="text-mutedText font-normal">
+                      ({Math.round(calculateGallerySize(formData.imageUrls) / 1024)} KB)
+                    </span>
+                  )}
+                </span>
+              </div>
             </div>
 
-            {/* Upload Button & URL fallback */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-3">
-              <label className="cursor-pointer inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-forest hover:bg-forest-light text-white text-xs font-semibold transition-colors shrink-0 shadow-xs">
-                <Upload className="w-4 h-4" />
-                <span>{uploadingImage ? 'Uploading to Firebase Storage...' : 'Upload Photos (Firebase Storage)'}</span>
-                <input
-                  type="file"
-                  multiple
-                  accept="image/*"
-                  disabled={uploadingImage}
-                  onChange={handleImageFileUpload}
-                  className="hidden"
-                />
-              </label>
+            {/* Notification / Error Alerts */}
+            {imageNotice && (
+              <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs font-semibold flex items-center gap-2 animate-in fade-in duration-200">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{imageNotice}</span>
+              </div>
+            )}
+
+            {imageError && (
+              <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-300 text-rose-800 text-xs font-semibold flex items-center gap-2 animate-in fade-in duration-200">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{imageError}</span>
+              </div>
+            )}
+
+            {/* Progress Box during batch upload */}
+            {processingImages && (
+              <div className="p-4 rounded-xl bg-forest/5 border border-forest/20 flex items-center justify-between gap-3 animate-pulse">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-6 h-6 border-2 border-forest border-t-transparent rounded-full animate-spin shrink-0" />
+                  <div>
+                    <p className="text-xs font-bold text-forest">
+                      Processing & Optimizing Image {processingProgress.current} of {processingProgress.total}...
+                    </p>
+                    <p className="text-[11px] text-mutedText">
+                      Resizing to high-def landscape and compressing directly in your browser.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Upload Button & External URL Bar */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="image/jpeg,image/png,image/webp,image/jpg"
+                disabled={processingImages || submitting || formData.imageUrls.length >= MAX_PROPERTY_IMAGES}
+                onChange={handleImageFilesSelected}
+                className="hidden"
+              />
+
+              <Button
+                type="button"
+                variant="primary"
+                size="md"
+                icon={Upload}
+                isLoading={processingImages}
+                disabled={submitting || formData.imageUrls.length >= MAX_PROPERTY_IMAGES}
+                onClick={() => fileInputRef.current?.click()}
+                className="shrink-0"
+              >
+                Upload Photos
+              </Button>
 
               <div className="flex-1 flex gap-2">
                 <input
                   type="url"
                   placeholder="Or paste external image URL (Unsplash, CDN, etc)..."
                   value={newImageUrlInput}
+                  disabled={processingImages || submitting}
                   onChange={(e) => setNewImageUrlInput(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
@@ -972,12 +1109,14 @@ export default function AgentPropertyForm() {
                       handleAddImageUrl();
                     }
                   }}
-                  className="flex-1 px-3.5 py-2 rounded-xl bg-ivory/60 border border-sage text-xs focus:outline-none focus:border-forest"
+                  className="flex-1 px-3.5 py-2 rounded-xl bg-ivory/60 border border-sage text-xs focus:outline-none focus:border-forest text-charcoal"
                 />
                 <Button
+                  type="button"
                   variant="secondary"
                   size="sm"
                   icon={Plus}
+                  disabled={processingImages || submitting || formData.imageUrls.length >= MAX_PROPERTY_IMAGES}
                   onClick={handleAddImageUrl}
                 >
                   Add URL
@@ -985,64 +1124,129 @@ export default function AgentPropertyForm() {
               </div>
             </div>
 
-            {errors.storageNotice && (
-              <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-900 mb-3 space-y-1">
-                <div className="flex items-center gap-1.5 font-bold">
-                  <AlertCircle className="w-4 h-4 text-amber-700" />
-                  <span>Cloud Storage Activation Notice</span>
-                </div>
-                <p className="leading-relaxed">{errors.storageNotice}</p>
-              </div>
-            )}
             {errors.newImageUrl && (
-              <p className="text-xs text-red-600 mb-2">{errors.newImageUrl}</p>
+              <p className="text-xs text-red-600">{errors.newImageUrl}</p>
             )}
             {errors.imageUrls && (
-              <p className="text-xs text-red-600 mb-2">{errors.imageUrls}</p>
+              <p className="text-xs text-red-600 font-semibold">{errors.imageUrls}</p>
             )}
 
-            {/* Thumbnail Preview Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
-              {formData.imageUrls.map((url, idx) => (
-                <div
-                  key={idx}
-                  className="relative group rounded-xl overflow-hidden border border-sage bg-ivory aspect-video"
-                >
-                  <img
-                    src={url}
-                    alt={`Preview ${idx + 1}`}
-                    className="w-full h-full object-cover"
-                    onError={(e) => {
-                      e.target.src = 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=400&q=80';
-                    }}
-                  />
-                  <div className="absolute inset-0 bg-charcoal/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 p-2">
-                    {idx !== 0 && (
-                      <button
-                        type="button"
-                        onClick={() => handleSetCoverImage(idx)}
-                        className="px-2 py-1 rounded-lg bg-gold text-forest hover:bg-gold-light text-[10px] font-bold transition-colors shadow-xs"
-                        title="Set as Cover Photo"
-                      >
-                        Make Cover
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveImage(idx)}
-                      className="p-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors"
-                      title="Remove image"
+            {/* Thumbnail Preview Grid with Reordering & Cover controls */}
+            {formData.imageUrls.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3.5 pt-2">
+                {formData.imageUrls.map((url, idx) => {
+                  const isCover = idx === 0;
+                  const isBase64 = typeof url === 'string' && url.startsWith('data:');
+                  const approxKb = isBase64 ? Math.round(url.length / 1024) : null;
+
+                  return (
+                    <div
+                      key={idx}
+                      className={`relative group rounded-2xl overflow-hidden border ${
+                        isCover ? 'border-gold shadow-md ring-2 ring-gold/40' : 'border-sage/70 shadow-xs'
+                      } bg-ivory aspect-[16/10] flex flex-col justify-between`}
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                  {idx === 0 && (
-                    <span className="absolute bottom-1.5 left-1.5 text-[9px] font-bold bg-forest text-white px-2 py-0.5 rounded shadow-sm border border-gold/40">
-                      ★ Cover Photo
-                    </span>
-                  )}
+                      <img
+                        src={url}
+                        alt={`Property photo ${idx + 1}`}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          e.currentTarget.src = 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=400&q=80';
+                        }}
+                      />
+
+                      {/* Top Badges */}
+                      <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-charcoal/70 text-white backdrop-blur-xs">
+                          #{idx + 1}
+                        </span>
+
+                        {isCover ? (
+                          <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-gold text-forest shadow border border-white tracking-wide">
+                            ★ Cover Photo
+                          </span>
+                        ) : approxKb ? (
+                          <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-black/50 text-white backdrop-blur-xs">
+                            {approxKb} KB
+                          </span>
+                        ) : null}
+                      </div>
+
+                      {/* Interactive Controls Overlay */}
+                      <div className="absolute inset-0 bg-charcoal/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-2.5 gap-2">
+                        <div className="flex items-center justify-between gap-1.5">
+                          {/* Reordering Buttons */}
+                          <div className="flex items-center gap-1">
+                            {idx > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => handleMoveImage(idx, idx - 1)}
+                                className="p-1.5 rounded-lg bg-white/90 text-charcoal hover:bg-forest hover:text-white transition-colors"
+                                title="Move left / earlier in gallery"
+                              >
+                                <ChevronLeft className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {idx < formData.imageUrls.length - 1 && (
+                              <button
+                                type="button"
+                                onClick={() => handleMoveImage(idx, idx + 1)}
+                                className="p-1.5 rounded-lg bg-white/90 text-charcoal hover:bg-forest hover:text-white transition-colors"
+                                title="Move right / later in gallery"
+                              >
+                                <ChevronRight className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            {!isCover && (
+                              <button
+                                type="button"
+                                onClick={() => handleSetCoverImage(idx)}
+                                className="px-2 py-1 rounded-lg bg-gold text-forest hover:bg-gold-light text-[10px] font-bold transition-colors shadow-xs"
+                                title="Set as Cover Photo"
+                              >
+                                Make Cover
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveImage(idx)}
+                              className="p-1.5 rounded-lg bg-rose-600 text-white hover:bg-rose-700 transition-colors shadow-xs"
+                              title="Remove photo"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="p-8 rounded-2xl border-2 border-dashed border-sage text-center space-y-2 bg-ivory/40">
+                <div className="w-10 h-10 rounded-xl bg-sage-light text-forest flex items-center justify-center mx-auto">
+                  <ImageIcon className="w-5 h-5" />
                 </div>
-              ))}
+                <h4 className="font-serif text-sm font-bold text-charcoal">
+                  No Property Photos Attached Yet
+                </h4>
+                <p className="text-xs text-mutedText max-w-sm mx-auto">
+                  Click <strong>Upload Photos</strong> to select photos from your device, or paste external image URLs. Up to {MAX_PROPERTY_IMAGES} photos supported per listing.
+                </p>
+              </div>
+            )}
+
+            <div className="p-3.5 rounded-xl bg-ivory/60 border border-sage/60 text-[11px] text-mutedText space-y-1">
+              <p className="font-bold text-charcoal flex items-center gap-1">
+                <Sparkles className="w-3 h-3 text-gold" />
+                <span>Zero External Storage Footprint</span>
+              </p>
+              <p className="leading-relaxed">
+                Photos uploaded from your device are automatically center-optimized to high-resolution landscape (max 960×640 px) and compressed under 75 KB locally in your browser. Saved images are permanently stored directly with the listing in Cloud Firestore without requiring Firebase Cloud Storage or third-party image hosting.
+              </p>
             </div>
           </div>
         </div>
@@ -1058,7 +1262,7 @@ export default function AgentPropertyForm() {
               variant="outline"
               size="md"
               onClick={() => navigate('/agent/properties')}
-              disabled={submitting}
+              disabled={submitting || processingImages}
             >
               Cancel
             </Button>
@@ -1068,6 +1272,7 @@ export default function AgentPropertyForm() {
               icon={Save}
               onClick={() => handleSubmit('draft')}
               isLoading={submitting}
+              disabled={processingImages}
             >
               Save as Draft
             </Button>
@@ -1077,6 +1282,7 @@ export default function AgentPropertyForm() {
               icon={Send}
               onClick={() => handleSubmit('pending')}
               isLoading={submitting}
+              disabled={processingImages}
             >
               Submit for Approval
             </Button>

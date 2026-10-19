@@ -417,6 +417,13 @@ export async function createAgentProperty(propertyData, targetStatus = 'draft') 
     updatedAt: nowIso,
   };
 
+  const serializedSize = JSON.stringify(payload).length;
+  if (serializedSize > 600 * 1024) {
+    throw new Error(
+      `Property document payload (${Math.round(serializedSize / 1024)} KB) exceeds the 600 KB safety limit for Cloud Firestore. Please reduce the number of attached photos.`
+    );
+  }
+
   const docRef = await addDoc(collection(agentDb, 'properties'), payload);
   return { id: docRef.id, ...payload };
 }
@@ -484,6 +491,14 @@ export async function updateAgentProperty(id, updates) {
     safeUpdates.publicationStatus = 'pending';
   }
   safeUpdates.isPublished = false;
+
+  const combinedCheck = { ...existingData, ...safeUpdates };
+  const serializedSize = JSON.stringify(combinedCheck).length;
+  if (serializedSize > 600 * 1024) {
+    throw new Error(
+      `Updated property document payload (${Math.round(serializedSize / 1024)} KB) exceeds the 600 KB safety limit for Cloud Firestore. Please remove some photos.`
+    );
+  }
 
   await updateDoc(propRef, safeUpdates);
   return { id, ...existingData, ...safeUpdates };

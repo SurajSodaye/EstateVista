@@ -144,3 +144,118 @@ export async function processProfileImage(file, options = {}) {
     height: dimension,
   };
 }
+
+// ========================================================
+// PROPERTY PHOTOGRAPHY PROCESSING (Direct Firestore Base64)
+// ========================================================
+
+export const MAX_PROPERTY_IMAGES = 8;
+export const MAX_PROPERTY_IMAGE_BYTES = 75 * 1024; // 75 KB max per compressed property image
+export const MAX_GALLERY_BUDGET_BYTES = 400 * 1024; // 400 KB total gallery payload limit for Firestore
+
+/**
+ * Calculates total byte footprint of base64 data URLs in a property gallery
+ * @param {Array<string>} imageUrls
+ * @returns {number}
+ */
+export function calculateGallerySize(imageUrls = []) {
+  if (!Array.isArray(imageUrls)) return 0;
+  return imageUrls.reduce((acc, url) => {
+    if (typeof url === 'string' && url.startsWith('data:')) {
+      return acc + url.length;
+    }
+    return acc;
+  }, 0);
+}
+
+/**
+ * Resizes and compresses a property photo to standard landscape resolution
+ * (max 960 × 640 px), optimizing down to ~35-55 KB per photo.
+ * 
+ * @param {File} file
+ * @param {Object} [options]
+ * @returns {Promise<{ dataUrl: string, sizeBytes: number, width: number, height: number, name: string }>}
+ */
+export async function processPropertyImage(file, options = {}) {
+  const maxW = options.maxWidth || 960;
+  const maxH = options.maxHeight || 640;
+  const maxBytes = options.maxBytes || MAX_PROPERTY_IMAGE_BYTES;
+
+  // 1. Validate MIME and decode
+  const img = await validateAndLoadImage(file);
+
+  // 2. Compute proportional aspect ratio
+  const srcW = img.naturalWidth || img.width;
+  const srcH = img.naturalHeight || img.height;
+
+  let targetW = srcW;
+  let targetH = srcH;
+
+  if (targetW > maxW || targetH > maxH) {
+    const scale = Math.min(maxW / targetW, maxH / targetH);
+    targetW = Math.max(1, Math.round(targetW * scale));
+    targetH = Math.max(1, Math.round(targetH * scale));
+  }
+
+  // 3. Render on Canvas 2D
+  const canvas = document.createElement('canvas');
+  canvas.width = targetW;
+  canvas.height = targetH;
+  const ctx = canvas.getContext('2d');
+
+  if (!ctx) {
+    throw new Error('Canvas 2D rendering is not supported in this browser.');
+  }
+
+  // Neutral background fill
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, targetW, targetH);
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, targetW, targetH);
+
+  // 4. Adaptive compression
+  let quality = 0.78;
+  let dataUrl = canvas.toDataURL('image/jpeg', quality);
+
+  if (dataUrl.length > maxBytes && quality > 0.6) {
+    quality = 0.68;
+    dataUrl = canvas.toDataURL('image/jpeg', quality);
+  }
+  if (dataUrl.length > maxBytes && quality > 0.5) {
+    quality = 0.55;
+    dataUrl = canvas.toDataURL('image/jpeg', quality);
+  }
+
+  if (dataUrl.length > maxBytes) {
+    throw new Error(
+      `Property image "${file.name}" compressed to ${Math.round(dataUrl.length / 1024)} KB, exceeding the single-photo limit of ${Math.round(maxBytes / 1024)} KB. Please choose a smaller photo.`
+    );
+  }
+
+  return {
+    dataUrl,
+    sizeBytes: dataUrl.length,
+    width: targetW,
+    height: targetH,
+    name: file.name,
+  };
+}
+
+/**
+ * Processes a property image locally in the browser to an optimized Base64 data URL
+ * for direct persistence in Cloud Firestore without external storage dependencies.
+ * 
+ * @param {File} file
+ * @param {Object} [options]
+ * @returns {Promise<{ url: string, sizeBytes: number, name: string }>}
+ */
+export async function uploadPropertyImage(file, options = {}) {
+  const processed = await processPropertyImage(file, options);
+  return {
+    url: processed.dataUrl,
+    sizeBytes: processed.sizeBytes,
+    name: processed.name,
+  };
+}
