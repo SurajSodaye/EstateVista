@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Mail, Lock, User, Eye, EyeOff, Building2, AlertCircle, Phone, CheckCircle2 } from 'lucide-react';
 import Button from '../components/common/Button';
 import Input from '../components/common/Input';
@@ -9,6 +9,7 @@ import { getAuthErrorMessage } from '../services/authService';
 
 export default function Register() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { currentUser, register, isFirebaseConfigured } = useAuth();
 
   const [formData, setFormData] = useState({
@@ -99,7 +100,8 @@ export default function Register() {
         phone: formData.phone,
         accountType: formData.accountType,
       });
-      navigate('/');
+      const destination = location.state?.from || '/';
+      navigate(destination);
     } catch (err) {
       setServerError(getAuthErrorMessage(err));
     } finally {

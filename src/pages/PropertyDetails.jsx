@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   MapPin,
   Bed,
@@ -23,6 +23,7 @@ import {
 import PropertyGallery from '../components/property/PropertyGallery';
 import PropertyInquiryForm from '../components/property/PropertyInquiryForm';
 import PropertyGrid from '../components/property/PropertyGrid';
+import { useSavedProperties } from '../context/SavedPropertiesContext';
 import Badge from '../components/common/Badge';
 import Button from '../components/common/Button';
 import LoadingState from '../components/common/LoadingState';
@@ -35,13 +36,27 @@ import { formatDate } from '../utils/formatDate';
 
 export default function PropertyDetails() {
   const { id } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { isSaved: isPropertySaved, toggleSave } = useSavedProperties();
+  const isSaved = isPropertySaved(id);
+
   const [property, setProperty] = useState(null);
   const [agent, setAgent] = useState(null);
   const [relatedProperties, setRelatedProperties] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isNotFound, setIsNotFound] = useState(false);
-  const [isSaved, setIsSaved] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+
+  const handleToggleSave = async () => {
+    if (!property) return;
+    const res = await toggleSave(property.id, property.title);
+    if (res?.action === 'require_auth') {
+      navigate('/login', {
+        state: { from: location.pathname + location.search },
+      });
+    }
+  };
 
   useEffect(() => {
     // Scroll to top upon ID change
@@ -159,14 +174,15 @@ export default function PropertyDetails() {
             </button>
             <button
               type="button"
-              onClick={() => setIsSaved(!isSaved)}
-              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border text-xs transition-colors ${
+              onClick={handleToggleSave}
+              aria-label={isSaved ? 'Remove from saved residences' : 'Save property to wishlist'}
+              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border text-xs font-semibold transition-all ${
                 isSaved
-                  ? 'bg-red-50 text-red-600 border-red-200'
-                  : 'bg-white text-charcoal border-sage hover:bg-sage/20'
+                  ? 'bg-red-50 text-red-600 border-red-200 shadow-sm'
+                  : 'bg-white text-charcoal border-sage hover:bg-sage/20 hover:text-red-500'
               }`}
             >
-              <Heart className={`w-3.5 h-3.5 ${isSaved ? 'fill-current' : ''}`} />
+              <Heart className={`w-3.5 h-3.5 transition-transform ${isSaved ? 'fill-current scale-110' : ''}`} />
               <span>{isSaved ? 'Saved' : 'Save'}</span>
             </button>
           </div>

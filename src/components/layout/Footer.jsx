@@ -85,6 +85,11 @@ export default function Footer() {
                 </Link>
               </li>
               <li>
+                <Link to="/saved-properties" className="hover:text-white transition-colors">
+                  Saved Residences
+                </Link>
+              </li>
+              <li>
                 <Link to="/agents" className="hover:text-white transition-colors">
                   Advisory Agents
                 </Link>

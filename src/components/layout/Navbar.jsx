@@ -3,9 +3,11 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { Menu, X, Building2, User, Heart, LogOut, LayoutDashboard, MessageSquare } from 'lucide-react';
 import Button from '../common/Button';
 import { useAuth } from '../../context/AuthContext';
+import { useSavedProperties } from '../../context/SavedPropertiesContext';
 
 export default function Navbar() {
   const { currentUser, userProfile, logout, isAdvisor, isAdmin } = useAuth();
+  const { savedCount } = useSavedProperties();
   const isCustomerUser = Boolean(currentUser && !isAdvisor && !isAdmin);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
@@ -154,9 +156,23 @@ export default function Navbar() {
                   Advisor Portal
                 </Button>
               </Link>
-              <Link to="/properties">
-                <Button variant="ghost" size="sm" icon={Heart} className="text-charcoal/80">
-                  Saved
+              <Link to="/saved-properties">
+                <Button
+                  variant={location.pathname === '/saved-properties' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  icon={Heart}
+                  className={`text-xs ${
+                    location.pathname === '/saved-properties'
+                      ? 'text-forest font-semibold'
+                      : 'text-charcoal/80'
+                  }`}
+                >
+                  <span>Saved</span>
+                  {savedCount > 0 && (
+                    <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-forest text-gold leading-none shadow-2xs">
+                      {savedCount}
+                    </span>
+                  )}
                 </Button>
               </Link>
               {isCustomerUser && (
@@ -291,12 +307,22 @@ export default function Navbar() {
                 </Button>
               </Link>
               <Link
-                to="/properties"
+                to="/saved-properties"
                 onClick={() => setIsMobileMenuOpen(false)}
                 className="w-full block"
               >
-                <Button variant="ghost" size="md" icon={Heart} className="w-full text-charcoal border border-sage/60">
-                  Saved Properties
+                <Button
+                  variant={location.pathname === '/saved-properties' ? 'secondary' : 'ghost'}
+                  size="md"
+                  icon={Heart}
+                  className="w-full text-charcoal border border-sage/60 flex items-center justify-between"
+                >
+                  <span>Saved Properties</span>
+                  {savedCount > 0 && (
+                    <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-forest text-gold">
+                      {savedCount}
+                    </span>
+                  )}
                 </Button>
               </Link>
               {isCustomerUser && (

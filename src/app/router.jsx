@@ -15,6 +15,7 @@ import AgentDetails from '../pages/AgentDetails';
 import About from '../pages/About';
 import Contact from '../pages/Contact';
 import MyInquiries from '../pages/MyInquiries';
+import SavedProperties from '../pages/SavedProperties';
 import Login from '../pages/Login';
 import Register from '../pages/Register';
 import ForgotPassword from '../pages/ForgotPassword';
@@ -153,6 +154,9 @@ export default function AppRouter() {
           <Route path="/" element={<Home />} />
           <Route path="/properties" element={<Properties />} />
           <Route path="/properties/:id" element={<PropertyDetails />} />
+          <Route path="/saved-properties" element={<SavedProperties />} />
+          <Route path="/saved" element={<Navigate to="/saved-properties" replace />} />
+          <Route path="/wishlist" element={<Navigate to="/saved-properties" replace />} />
           <Route path="/agents" element={<Agents />} />
           <Route path="/agents/:id" element={<AgentDetails />} />
           <Route path="/about" element={<About />} />

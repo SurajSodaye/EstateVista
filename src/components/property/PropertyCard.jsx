@@ -1,21 +1,31 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Heart, MapPin, Bed, Bath, Maximize2, ArrowUpRight } from 'lucide-react';
 import { formatCurrency } from '../../utils/formatCurrency';
 import Badge from '../common/Badge';
+import { useSavedProperties } from '../../context/SavedPropertiesContext';
 
 export default function PropertyCard({ property }) {
-  const [isFavorite, setIsFavorite] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { isSaved, toggleSave } = useSavedProperties();
+  const isFavorite = isSaved(property.id);
+
   const [imgSrc, setImgSrc] = useState(
     property.imageUrls && property.imageUrls.length > 0
       ? property.imageUrls[0]
       : 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=800&q=80'
   );
 
-  const toggleFavorite = (e) => {
+  const toggleFavorite = async (e) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsFavorite(!isFavorite);
+    const res = await toggleSave(property.id, property.title);
+    if (res?.action === 'require_auth') {
+      navigate('/login', {
+        state: { from: location.pathname + location.search },
+      });
+    }
   };
 
   const handleImageError = () => {
