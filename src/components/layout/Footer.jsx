@@ -160,12 +160,7 @@ export default function Footer() {
                 <span>concierge@estatevista.demo</span>
               </li>
             </ul>
-            <div className="pt-2">
-              <span className="inline-flex items-center gap-1.5 text-xs text-gold/90 bg-forest-light px-3 py-1.5 rounded-lg border border-gold/20">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                <span>Demo Registry Live</span>
-              </span>
-            </div>
+
           </div>
         </div>
 

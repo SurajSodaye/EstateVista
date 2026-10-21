@@ -1136,7 +1136,7 @@ export default function AgentPropertyForm() {
                 type="file"
                 multiple
                 accept="image/jpeg,image/png,image/webp,image/jpg"
-                disabled={processingImages || submitting || formData.imageUrls.length >= MAX_PROPERTY_IMAGES}
+                disabled={processingImages || isSubmitting || formData.imageUrls.length >= MAX_PROPERTY_IMAGES}
                 onChange={handleImageFilesSelected}
                 className="hidden"
               />
@@ -1147,7 +1147,7 @@ export default function AgentPropertyForm() {
                 size="md"
                 icon={Upload}
                 isLoading={processingImages}
-                disabled={submitting || formData.imageUrls.length >= MAX_PROPERTY_IMAGES}
+                disabled={isSubmitting || formData.imageUrls.length >= MAX_PROPERTY_IMAGES}
                 onClick={() => fileInputRef.current?.click()}
                 className="shrink-0"
               >
@@ -1159,7 +1159,7 @@ export default function AgentPropertyForm() {
                   type="url"
                   placeholder="Or paste external image URL (Unsplash, CDN, etc)..."
                   value={newImageUrlInput}
-                  disabled={processingImages || submitting}
+                  disabled={processingImages || isSubmitting}
                   onChange={(e) => setNewImageUrlInput(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
@@ -1174,7 +1174,7 @@ export default function AgentPropertyForm() {
                   variant="secondary"
                   size="sm"
                   icon={Plus}
-                  disabled={processingImages || submitting || formData.imageUrls.length >= MAX_PROPERTY_IMAGES}
+                  disabled={processingImages || isSubmitting || formData.imageUrls.length >= MAX_PROPERTY_IMAGES}
                   onClick={handleAddImageUrl}
                 >
                   Add URL

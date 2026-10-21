@@ -99,7 +99,7 @@ export default function AdminLayout() {
       badgeVariant: 'emerald',
     },
     {
-      name: 'Settings & Audit',
+      name: 'Settings',
       path: '/admin/settings',
       icon: Sliders,
       badge: null,
@@ -351,12 +351,6 @@ export default function AdminLayout() {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
-            {/* Operational live telemetry pill */}
-            <div className="hidden lg:flex items-center gap-1.5 px-3 py-1 rounded-full text-xs bg-emerald-50 text-emerald-800 border border-emerald-200">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span>Cloud Synchronized</span>
-            </div>
-
             <Button
               variant="outline"
               size="sm"
