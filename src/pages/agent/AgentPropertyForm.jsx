@@ -31,6 +31,7 @@ import {
   getAgentPropertyById,
   createAgentProperty,
   updateAgentProperty,
+  generateStablePropertyId,
 } from '../../services/agentPortalService';
 import {
   uploadPropertyImage,
@@ -72,7 +73,11 @@ export default function AgentPropertyForm() {
 
   const [loading, setLoading] = useState(isEditMode);
   const [notFound, setNotFound] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submittingAction, setSubmittingAction] = useState(null); // 'draft' | 'pending' | null
+  const isSubmittingRef = useRef(false);
+  const submissionDocIdRef = useRef(id || null);
+  const [hasCreatedRecord, setHasCreatedRecord] = useState(isEditMode);
   const [successNotice, setSuccessNotice] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -114,6 +119,16 @@ export default function AgentPropertyForm() {
   const [errors, setErrors] = useState({});
 
 
+
+  // Ensure stable document ID is established for this creation session or bound to existing ID
+  useEffect(() => {
+    if (isEditMode) {
+      submissionDocIdRef.current = id;
+      setHasCreatedRecord(true);
+    } else if (!submissionDocIdRef.current) {
+      submissionDocIdRef.current = generateStablePropertyId();
+    }
+  }, [id, isEditMode]);
 
   // Load existing property when in edit mode
   useEffect(() => {
@@ -418,6 +433,11 @@ export default function AgentPropertyForm() {
 
   // Form Submit Handler
   const handleSubmit = async (targetStatus) => {
+    // 1. Synchronously ignore any repeated clicks, double-clicks, or Enter events while in-flight
+    if (isSubmittingRef.current || isSubmitting) {
+      return;
+    }
+
     setErrorMessage('');
     if (!validateForm()) {
       // Scroll to top of form to show validation messages
@@ -425,7 +445,16 @@ export default function AgentPropertyForm() {
       return;
     }
 
-    setSubmitting(true);
+    // 2. Lock immediately before async operations begin
+    isSubmittingRef.current = true;
+    setIsSubmitting(true);
+    setSubmittingAction(targetStatus);
+
+    // 3. Guarantee a stable property document ID for this submission session
+    if (!submissionDocIdRef.current) {
+      submissionDocIdRef.current = id || generateStablePropertyId();
+    }
+    const currentDocId = submissionDocIdRef.current;
 
     const submissionPayload = {
       ...formData,
@@ -443,30 +472,122 @@ export default function AgentPropertyForm() {
     };
 
     try {
-      if (isEditMode) {
-        await updateAgentProperty(id, submissionPayload);
+      if (isEditMode || hasCreatedRecord) {
+        // Updating an existing draft, resubmitting a rejected listing, or applying revisions
+        await updateAgentProperty(currentDocId, submissionPayload);
         setSuccessNotice({
-          title: 'Listing Updated in Firestore',
-          message: `The changes to "${formData.title}" have been saved to Cloud Firestore (${targetStatus === 'pending' ? 'Submitted for Editorial Review' : 'Saved as Draft'}).`,
+          status: targetStatus,
+          propertyTitle: formData.title?.trim() || 'Property Listing',
+          isEdit: true,
+          propertyId: currentDocId,
         });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       } else {
-        const created = await createAgentProperty(submissionPayload, targetStatus);
+        // Initial creation with deterministic stable document ID
+        const created = await createAgentProperty(submissionPayload, targetStatus, currentDocId);
+        setHasCreatedRecord(true);
+        submissionDocIdRef.current = created.id;
         setSuccessNotice({
-          title: 'Listing Created in Firestore',
-          message: `"${created.title}" has been saved to Cloud Firestore as a ${targetStatus === 'pending' ? 'Pending Approval' : 'Draft'} listing.`,
+          status: targetStatus,
+          propertyTitle: created?.title?.trim() || formData.title?.trim() || 'Property Listing',
+          isEdit: false,
+          propertyId: created.id,
         });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       }
     } catch (err) {
       console.error('Failed to save listing:', err);
       setErrorMessage(err.message || 'Failed to save property listing to Cloud Firestore. Please verify your connection.');
       window.scrollTo({ top: 120, behavior: 'smooth' });
     } finally {
-      setSubmitting(false);
+      // Re-enable button only if the request failed or completed
+      isSubmittingRef.current = false;
+      setIsSubmitting(false);
+      setSubmittingAction(null);
+    }
+  };
+
+  // Render dedicated success confirmation panel once property is saved
+  if (successNotice) {
+    const isPendingReview = successNotice.status === 'pending';
+    return (
+      <div className="max-w-2xl mx-auto py-8 sm:py-14 animate-in fade-in duration-200">
+        <div className="bg-white rounded-3xl border border-sage/80 shadow-soft p-8 sm:p-12 text-center space-y-6">
+          {/* Tasteful success checkmark icon with subtle green accent */}
+          <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 border border-emerald-200/80 flex items-center justify-center mx-auto shadow-xs">
+            <CheckCircle2 className="w-8 h-8 stroke-[2]" />
+          </div>
+
+          {/* Status badge */}
+          <div>
+            <span
+              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${
+                isPendingReview
+                  ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                  : 'bg-slate-100 text-slate-700 border border-slate-300'
+              }`}
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  isPendingReview ? 'bg-amber-500 animate-pulse' : 'bg-slate-400'
+                }`}
+              />
+              {isPendingReview ? 'Pending Review' : 'Draft'}
+            </span>
+          </div>
+
+          {/* Title & Description */}
+          <div className="space-y-3">
+            <h2 className="font-serif text-2xl sm:text-3xl font-bold text-charcoal tracking-tight">
+              {isPendingReview ? 'Property Submitted Successfully!' : 'Property Saved as Draft'}
+            </h2>
+            <p className="text-sm sm:text-base text-charcoal/80 leading-relaxed max-w-lg mx-auto">
+              {isPendingReview
+                ? `Your property "${successNotice.propertyTitle}" has been submitted successfully for review. Our team will review your listing, and you will be notified once a decision has been made.`
+                : `Your property "${successNotice.propertyTitle}" has been saved as a draft. You can continue editing or submit it for review at any time.`}
+            </p>
+          </div>
+
+          {/* Optional supporting text */}
+          <p className="text-xs sm:text-sm text-mutedText">
+            {isPendingReview
+              ? "You can track your property's review status in My Properties."
+              : 'You can access your drafts anytime in My Properties.'}
+          </p>
+
+          {/* Action buttons */}
+          <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+            <Button
+              variant="primary"
+              size="md"
+              onClick={() => navigate('/agent/properties')}
+              className="w-full sm:w-auto shadow-sm"
+            >
+              View My Properties
+            </Button>
+            <Button
+              variant="outline"
+              size="md"
+              onClick={() => navigate('/agent/dashboard')}
+              className="w-full sm:w-auto"
+            >
+              Back to Dashboard
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const handleFormKeyDown = (e) => {
+    // Prevent Enter key in single-line inputs from triggering accidental submissions
+    if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') {
+      e.preventDefault();
     }
   };
 
   return (
-    <div className="space-y-8 max-w-5xl mx-auto">
+    <div onKeyDown={handleFormKeyDown} className="space-y-8 max-w-5xl mx-auto">
       {/* Back button and page title */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -493,7 +614,7 @@ export default function AgentPropertyForm() {
             variant="outline"
             size="sm"
             onClick={() => navigate('/agent/properties')}
-            disabled={submitting || processingImages}
+            disabled={isSubmitting || processingImages}
           >
             Cancel
           </Button>
@@ -502,20 +623,20 @@ export default function AgentPropertyForm() {
             size="sm"
             icon={Save}
             onClick={() => handleSubmit('draft')}
-            isLoading={submitting}
-            disabled={processingImages}
+            isLoading={isSubmitting && submittingAction === 'draft'}
+            disabled={isSubmitting || processingImages}
           >
-            Save as Draft
+            {isSubmitting && submittingAction === 'draft' ? 'Saving...' : 'Save as Draft'}
           </Button>
           <Button
             variant="primary"
             size="sm"
             icon={Send}
             onClick={() => handleSubmit('pending')}
-            isLoading={submitting}
-            disabled={processingImages}
+            isLoading={isSubmitting && submittingAction === 'pending'}
+            disabled={isSubmitting || processingImages}
           >
-            Submit for Approval
+            {isSubmitting && submittingAction === 'pending' ? 'Submitting...' : 'Submit for Review'}
           </Button>
         </div>
       </div>
@@ -566,76 +687,13 @@ export default function AgentPropertyForm() {
               {formData.rejectionReason}
             </p>
             <p className="text-[11px] text-rose-700 pt-0.5">
-              Please address the administrator feedback above and click <strong>"Submit for Approval"</strong> to resubmit this listing.
+              Please address the administrator feedback above and click <strong>"Submit for Review"</strong> to resubmit this listing.
             </p>
           </div>
         </div>
       )}
 
-      {/* Success Notification Modal */}
-      {successNotice && (
-        <div className="bg-emerald-50 border border-emerald-300 rounded-2xl p-6 shadow-soft flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-in fade-in duration-200">
-          <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
-              <CheckCircle2 className="w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="font-bold text-emerald-900 text-base">
-                {successNotice.title}
-              </h3>
-              <p className="text-xs sm:text-sm text-emerald-800 mt-0.5">
-                {successNotice.message}
-              </p>
-              <p className="text-[11px] text-emerald-700 font-medium mt-1">
-                ✓ Persisted and synchronized with Cloud Firestore
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 self-end sm:self-center">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigate('/agent/properties')}
-            >
-              View My Properties
-            </Button>
-            {!isEditMode && (
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => {
-                  setSuccessNotice(null);
-                  setErrorMessage('');
-                  setFormData({
-                    title: '',
-                    description: '',
-                    listingType: 'Buy',
-                    propertyType: 'Apartment',
-                    price: '',
-                    bedrooms: '3',
-                    bathrooms: '3',
-                    areaSqFt: '',
-                    furnishing: 'Fully Furnished',
-                    parkingSlots: '2',
-                    address: '',
-                    locality: '',
-                    city: 'Mumbai',
-                    state: 'Maharashtra',
-                    postalCode: '',
-                    amenities: ['24/7 Security', 'Covered Parking'],
-                    imageUrls: [],
-                    isFeatured: false,
-                    publicationStatus: 'draft',
-                    rejectionReason: null,
-                  });
-                }}
-              >
-                Add Another
-              </Button>
-            )}
-          </div>
-        </div>
-      )}
+
 
       {/* Main Form Body */}
       <div className="space-y-8">
@@ -1262,7 +1320,7 @@ export default function AgentPropertyForm() {
               variant="outline"
               size="md"
               onClick={() => navigate('/agent/properties')}
-              disabled={submitting || processingImages}
+              disabled={isSubmitting || processingImages}
             >
               Cancel
             </Button>
@@ -1271,20 +1329,20 @@ export default function AgentPropertyForm() {
               size="md"
               icon={Save}
               onClick={() => handleSubmit('draft')}
-              isLoading={submitting}
-              disabled={processingImages}
+              isLoading={isSubmitting && submittingAction === 'draft'}
+              disabled={isSubmitting || processingImages}
             >
-              Save as Draft
+              {isSubmitting && submittingAction === 'draft' ? 'Saving...' : 'Save as Draft'}
             </Button>
             <Button
               variant="primary"
               size="md"
               icon={Send}
               onClick={() => handleSubmit('pending')}
-              isLoading={submitting}
-              disabled={processingImages}
+              isLoading={isSubmitting && submittingAction === 'pending'}
+              disabled={isSubmitting || processingImages}
             >
-              Submit for Approval
+              {isSubmitting && submittingAction === 'pending' ? 'Submitting...' : 'Submit for Review'}
             </Button>
           </div>
         </div>

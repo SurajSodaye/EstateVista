@@ -671,8 +671,11 @@ export async function getFirestoreAdminProperties({ search = '', status = 'all',
     const propsColl = collection(db, 'properties');
     const snapshot = await getDocs(propsColl);
     let properties = [];
+    const seenIds = new Set();
 
     snapshot.forEach((docSnap) => {
+      if (seenIds.has(docSnap.id)) return;
+      seenIds.add(docSnap.id);
       const data = docSnap.data();
       const pubStatus = data.publicationStatus || (data.isPublished ? 'published' : 'draft');
       properties.push({
@@ -777,7 +780,10 @@ export function subscribeFirestoreAdminProperties(callback, { search = '', statu
     propsColl,
     (snapshot) => {
       let properties = [];
+      const seenIds = new Set();
       snapshot.forEach((docSnap) => {
+        if (seenIds.has(docSnap.id)) return;
+        seenIds.add(docSnap.id);
         const data = docSnap.data();
         const pubStatus = data.publicationStatus || (data.isPublished ? 'published' : 'draft');
         properties.push({

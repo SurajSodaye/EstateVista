@@ -370,12 +370,36 @@ export async function getAgentPropertyById(id) {
 }
 
 /**
- * Create a new property listing in Cloud Firestore
+ * Generate a client-side stable unique property ID.
+ * Uses Firestore's native ID generator when available, ensuring unique, cryptographically
+ * random 20-character document keys without making network requests.
+ * @returns {string}
+ */
+export function generateStablePropertyId() {
+  if (isFirebaseConfigured && agentDb) {
+    try {
+      return doc(collection(agentDb, 'properties')).id;
+    } catch {
+      // Fallback below
+    }
+  }
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let autoId = '';
+  for (let i = 0; i < 20; i++) {
+    autoId += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return autoId;
+}
+
+/**
+ * Create or idempotently submit a property listing in Cloud Firestore
+ * Ensures repeated submissions or retries of the same form session reuse the stable document ID.
  * @param {Object} propertyData
  * @param {string} targetStatus ('draft' | 'pending' | 'published')
- * @returns {Promise<Object>} Created property with document ID
+ * @param {string|null} customPropertyId - Optional stable property document ID
+ * @returns {Promise<Object>} Created or updated property with document ID
  */
-export async function createAgentProperty(propertyData, targetStatus = 'draft') {
+export async function createAgentProperty(propertyData, targetStatus = 'draft', customPropertyId = null) {
   if (!isFirebaseConfigured || !agentDb) {
     throw new Error('Firebase configuration missing.');
   }
@@ -396,6 +420,10 @@ export async function createAgentProperty(propertyData, targetStatus = 'draft') 
     ? rawImages.filter((img) => typeof img === 'string' && img.trim())
     : [];
 
+  // Establish a stable document ID: reuse customPropertyId, or propertyData.id, or generate once
+  const propertyId = customPropertyId || propertyData.id || generateStablePropertyId();
+  const propRef = doc(agentDb, 'properties', propertyId);
+
   const payload = {
     ...propertyData,
     imageUrls: normalizedImages,
@@ -413,9 +441,11 @@ export async function createAgentProperty(propertyData, targetStatus = 'draft') 
     agentId: currentUid,
     agentName: author.displayName || propertyData.agentName || 'Advisor',
     agentEmail: author.email || propertyData.agentEmail || '',
-    createdAt: nowIso,
+    createdAt: propertyData.createdAt || nowIso,
     updatedAt: nowIso,
   };
+
+  delete payload.id;
 
   const serializedSize = JSON.stringify(payload).length;
   if (serializedSize > 600 * 1024) {
@@ -424,8 +454,33 @@ export async function createAgentProperty(propertyData, targetStatus = 'draft') 
     );
   }
 
-  const docRef = await addDoc(collection(agentDb, 'properties'), payload);
-  return { id: docRef.id, ...payload };
+  // Idempotency check: If a document with this stable ID already exists (e.g. retry after timeout or network drop)
+  const existingSnap = await getDoc(propRef);
+  if (existingSnap.exists()) {
+    const existingData = existingSnap.data();
+    if (existingData.createdByUid && existingData.createdByUid !== currentUid) {
+      throw new Error('Security Error: You are only permitted to update your own listings.');
+    }
+
+    const safeUpdates = {
+      ...payload,
+      createdAt: existingData.createdAt || payload.createdAt,
+      createdByUid: existingData.createdByUid || currentUid,
+      agentId: existingData.agentId || currentUid,
+      updatedAt: nowIso,
+    };
+
+    if (publicationStatus === 'pending') {
+      safeUpdates.rejectionReason = null;
+    }
+
+    await setDoc(propRef, safeUpdates, { merge: true });
+    return { id: propertyId, ...existingData, ...safeUpdates };
+  }
+
+  // Initial document creation with deterministic document reference
+  await setDoc(propRef, payload);
+  return { id: propertyId, ...payload };
 }
 
 /**
@@ -491,6 +546,11 @@ export async function updateAgentProperty(id, updates) {
     safeUpdates.publicationStatus = 'pending';
   }
   safeUpdates.isPublished = false;
+
+  // Clear rejection reason upon resubmission for review
+  if (safeUpdates.publicationStatus === 'pending') {
+    safeUpdates.rejectionReason = null;
+  }
 
   const combinedCheck = { ...existingData, ...safeUpdates };
   const serializedSize = JSON.stringify(combinedCheck).length;
