@@ -161,7 +161,7 @@ export default function AdvisorPortalLanding() {
         </div>
       ) : (
         // STATE 3: NOT LOGGED IN AS ADVISOR (TWO CLEAR OPTIONS)
-        <div className="space-y-6 max-w-4xl mx-auto">
+        <div className="space-y-6 max-w-5xl mx-auto">
           {agentUser && !isAdvisor && !isPendingAdvisor && (
             <div className="bg-amber-50 border border-amber-300 rounded-2xl px-5 py-3 text-xs text-amber-900 flex items-center justify-between gap-3 animate-in fade-in">
               <span>Signed in as: <strong>{agentUser.email}</strong> (Standard Account — No Advisor Clearance)</span>
@@ -180,9 +180,9 @@ export default function AdvisorPortalLanding() {
               <span className="text-mutedText">Advisor sessions operate independently</span>
             </div>
           )}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-stretch">
             {/* Option A: Advisor Login */}
-            <div className="bg-white rounded-3xl p-8 border border-sage shadow-card flex flex-col justify-between hover:border-forest/50 transition-all group">
+            <div className="bg-white rounded-3xl p-8 border border-sage shadow-card flex flex-col justify-between hover:border-forest/50 transition-all group h-full">
               <div className="space-y-4">
                 <div className="w-14 h-14 rounded-2xl bg-forest text-gold flex items-center justify-center shadow-sm">
                   <Lock className="w-7 h-7" />
@@ -217,42 +217,42 @@ export default function AdvisorPortalLanding() {
                 </Link>
               </div>
             </div>
-          </div>
 
-          {/* Option B: Become an Advisor */}
-          <div className="bg-white rounded-3xl p-8 border border-sage shadow-card flex flex-col justify-between hover:border-forest/50 transition-all group">
-            <div className="space-y-4">
-              <div className="w-14 h-14 rounded-2xl bg-gold/15 text-forest flex items-center justify-center border border-gold/40 shadow-sm">
-                <Award className="w-7 h-7" />
+            {/* Option B: Become an Advisor */}
+            <div className="bg-white rounded-3xl p-8 border border-sage shadow-card flex flex-col justify-between hover:border-forest/50 transition-all group h-full">
+              <div className="space-y-4">
+                <div className="w-14 h-14 rounded-2xl bg-gold/15 text-forest flex items-center justify-center border border-gold/40 shadow-sm">
+                  <Award className="w-7 h-7" />
+                </div>
+                <h2 className="font-serif text-2xl font-bold text-charcoal group-hover:text-forest transition-colors">
+                  Become an Advisor
+                </h2>
+                <p className="text-xs sm:text-sm text-mutedText leading-relaxed">
+                  Represent landmark residential properties on India's premier luxury real estate network. Apply for verified advisor status with your agency credentials.
+                </p>
+                <ul className="text-xs text-charcoal/80 space-y-2 pt-2">
+                  <li className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-gold" />
+                    Editorial quality review & accreditation
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-gold" />
+                    Prominent placement in Advisor Directory
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-gold" />
+                    Dedicated concierge support
+                  </li>
+                </ul>
               </div>
-              <h2 className="font-serif text-2xl font-bold text-charcoal group-hover:text-forest transition-colors">
-                Become an Advisor
-              </h2>
-              <p className="text-xs sm:text-sm text-mutedText leading-relaxed">
-                Represent landmark residential properties on India's premier luxury real estate network. Apply for verified advisor status with your agency credentials.
-              </p>
-              <ul className="text-xs text-charcoal/80 space-y-2 pt-2">
-                <li className="flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-gold" />
-                  Editorial quality review & accreditation
-                </li>
-                <li className="flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-gold" />
-                  Prominent placement in Advisor Directory
-                </li>
-                <li className="flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-gold" />
-                  Dedicated concierge support
-                </li>
-              </ul>
-            </div>
 
-            <div className="pt-8">
-              <Link to="/agent/apply">
-                <Button variant="gold" size="lg" icon={ArrowRight} iconPosition="right" className="w-full">
-                  Apply to Join
-                </Button>
-              </Link>
+              <div className="pt-8">
+                <Link to="/agent/apply">
+                  <Button variant="gold" size="lg" icon={ArrowRight} iconPosition="right" className="w-full">
+                    Apply to Join
+                  </Button>
+                </Link>
+              </div>
             </div>
           </div>
         </div>

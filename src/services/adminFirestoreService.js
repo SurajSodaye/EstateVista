@@ -1537,6 +1537,13 @@ export async function createFirestoreAdminProperty(propertyData, adminUser) {
     lastEditedByAdmin: adminUser.email || 'Administrator',
   };
 
+  const serializedSize = JSON.stringify(payload).length;
+  if (serializedSize > 600 * 1024) {
+    throw new Error(
+      `Property document payload (${Math.round(serializedSize / 1024)} KB) exceeds the 600 KB safety limit for Cloud Firestore. Please reduce the number of attached photos.`
+    );
+  }
+
   const docRef = await addDoc(collection(db, 'properties'), payload);
 
   await logFirestoreAdminAction({
@@ -1639,6 +1646,13 @@ export async function updateFirestoreAdminProperty(id, updates, adminUser) {
     updatedAt: nowIso,
     lastEditedByAdmin: adminUser?.email || 'Administrator',
   };
+
+  const serializedSize = JSON.stringify(payload).length;
+  if (serializedSize > 600 * 1024) {
+    throw new Error(
+      `Property document payload (${Math.round(serializedSize / 1024)} KB) exceeds the 600 KB safety limit for Cloud Firestore. Please reduce the number of attached photos.`
+    );
+  }
 
   await updateDoc(propRef, payload);
 

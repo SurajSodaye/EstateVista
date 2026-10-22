@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Heart, MapPin, Bed, Bath, Maximize2, ArrowUpRight } from 'lucide-react';
 import { formatCurrency } from '../../utils/formatCurrency';
@@ -11,11 +11,24 @@ export default function PropertyCard({ property }) {
   const { isSaved, toggleSave } = useSavedProperties();
   const isFavorite = isSaved(property.id);
 
-  const [imgSrc, setImgSrc] = useState(
-    property.imageUrls && property.imageUrls.length > 0
-      ? property.imageUrls[0]
-      : 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=800&q=80'
-  );
+  const resolvePropertyImage = (prop) => {
+    if (prop?.imageUrls && prop.imageUrls.length > 0 && prop.imageUrls[0]) {
+      return prop.imageUrls[0];
+    }
+    if (prop?.images && prop.images.length > 0 && prop.images[0]) {
+      return prop.images[0];
+    }
+    if (prop?.featuredImage) {
+      return prop.featuredImage;
+    }
+    return 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=800&q=80';
+  };
+
+  const [imgSrc, setImgSrc] = useState(() => resolvePropertyImage(property));
+
+  useEffect(() => {
+    setImgSrc(resolvePropertyImage(property));
+  }, [property?.imageUrls, property?.images, property?.featuredImage]);
 
   const toggleFavorite = async (e) => {
     e.preventDefault();
