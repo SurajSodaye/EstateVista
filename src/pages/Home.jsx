@@ -91,7 +91,7 @@ export default function Home() {
               <p className="text-xs text-sage/80 mt-1 uppercase tracking-wider font-medium">Curated Assets</p>
             </div>
             <div>
-              <p className="font-serif text-2xl sm:text-3xl font-bold text-gold">₹15,000+ Cr</p>
+              <p className="font-serif text-2xl sm:text-3xl font-bold text-gold">₹15,000 +</p>
               <p className="text-xs text-sage/80 mt-1 uppercase tracking-wider font-medium">Registry Value</p>
             </div>
             <div>
